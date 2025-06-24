@@ -12,7 +12,7 @@ from pydantic import HttpUrl
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# --- Phase 1 ---
+# --- Phase 1 ---
 class _Settings(BaseSettings):
     # environment
     ENV: str = "development"  # development | staging | production
@@ -20,19 +20,21 @@ class _Settings(BaseSettings):
     # CORS
     CORS_ALLOW_ORIGINS: List[str] = ["*"]
 
-    # Security / JWT (Phase 2 will add OAUTH_GOOGLE_CLIENT_ID/SECRET)
+    # Security / JWT (Phase 2 will add OAUTH_GOOGLE_CLIENT_ID/SECRET)
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     # e.g. "http://localhost:8000"  (no trailing slash)
     API_BASE_URL: HttpUrl = "http://localhost:8000"
+    # Frontend URL for redirects after OAuth
+    FRONTEND_URL: HttpUrl = "http://localhost:3000"
     SECRET_KEY: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
 
     # Gemini
     GEMINI_API_KEY: str | None = None          # set this in .env / secrets manager
     GEMINI_MODEL: str = "gemini-1.5-pro-latest"  # or "gemini-pro"
 
-    # Database (Phase 2)
+    # Database (Phase 2)
     DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
 
     # Log level (DEBUG/INFO/WARNING/ERROR)
@@ -45,8 +47,8 @@ class _Settings(BaseSettings):
         case_sensitive=True,
     )
 
-     # ─── Drive push – channel lasts up to 7 days ────────────────
-    DRIVE_CHANNEL_TTL_HOURS: int = 168         # 7 days
+     # ─── Drive push – channel lasts up to 7 days ────────────────
+    DRIVE_CHANNEL_TTL_HOURS: int = 168         # 7 days
     DRIVE_WEBHOOK_PATH: str = "/api/v1/webhooks/drive"  # local path
 
     @property
