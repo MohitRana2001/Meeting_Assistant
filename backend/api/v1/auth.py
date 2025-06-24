@@ -14,6 +14,7 @@ from services.google_oauth import build_flow, get_user_info
 from services.drive_client import ensure_drive_watch
 from services import drive_client
 from core.logging import logger
+from core.security import get_current_user
 # from services.auth_helper import check_user_has_required_scopes, get_missing_scopes, force_reauthentication_url
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -87,7 +88,7 @@ async def auth_google_callback(
             logger.warning("Meet Recordings folder not found for {}", email)
 
         # you could redirect to front‑end with token in fragment:
-        redirect_url = f"{str(settings.API_BASE_URL).rstrip('/')}/login/success?token={jwt_token}"
+        redirect_url = f"{str(settings.FRONTEND_URL).rstrip('/')}/dashboard?token={jwt_token}"
         await ensure_drive_watch(user)
         await session.commit()
         return RedirectResponse(redirect_url)
@@ -102,6 +103,7 @@ async def auth_google_callback(
 
 @router.get("/check-permissions")
 async def check_user_permissions(
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -109,23 +111,13 @@ async def check_user_permissions(
     Returns re-authentication URL if permissions are missing.
     """
     try:
-        # For now, get the first user (in a real app, you'd get this from JWT token)
-        result = await session.execute(select(User))
-        user = result.scalars().first()
+        logger.info("Checking permissions for user: {}", current_user.email)
         
-        if not user:
-            return {
-                "status": "not_authenticated",
-                "message": "No user found - please authenticate",
-                "needs_reauthentication": True,
-                "reauthentication_url": f"{str(settings.API_BASE_URL).rstrip('/')}/api/v1/auth/google"
-            }
-        
-        # For now, assume user has permissions if they exist
-        # In a real app, you'd check the actual scopes
+        # For now, assume user has permissions if they are authenticated
+        # In a real app, you'd check the actual OAuth scopes stored with the user
         return {
             "status": "ok",
-            "message": "User has all required permissions",
+            "message": f"User {current_user.email} has all required permissions",
             "needs_reauthentication": False
         }
             
