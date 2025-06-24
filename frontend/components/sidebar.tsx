@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { apiService, UserProfile } from "@/lib/api";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -28,16 +29,63 @@ export function Sidebar({
   activeItem = "dashboard",
   onItemSelect,
 }: SidebarProps) {
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [authStatus, setAuthStatus] = useState<"loading" | "ok" | "error">(
+    "loading"
+  );
+
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendar", icon: Calendar },
     { id: "settings", label: "Settings", icon: Settings },
   ];
 
+  // Load user profile on component mount
+  useEffect(() => {
+    loadUserProfile();
+  }, []);
+
+  const loadUserProfile = async () => {
+    try {
+      const token = localStorage.getItem("auth_token");
+      if (!token) {
+        setAuthStatus("error");
+        return;
+      }
+
+      const [profile, authCheck] = await Promise.all([
+        apiService.getUserProfile(),
+        apiService.checkAuth(),
+      ]);
+
+      setUserProfile(profile);
+      setAuthStatus(authCheck.status === "ok" ? "ok" : "error");
+    } catch (error) {
+      console.error("Failed to load user profile:", error);
+      setAuthStatus("error");
+    }
+  };
+
   const handleItemClick = (itemId: string) => {
     if (onItemSelect) {
       onItemSelect(itemId);
     }
+  };
+
+  const getInitials = (name: string | null, email: string) => {
+    if (name) {
+      return name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    return email.slice(0, 2).toUpperCase();
+  };
+
+  const getDisplayName = (profile: UserProfile) => {
+    return profile.full_name || profile.email.split("@")[0];
   };
 
   return (
@@ -119,24 +167,66 @@ export function Sidebar({
           )}
         >
           <Avatar className="h-8 w-8">
-            <AvatarImage src="/placeholder.svg?height=32&width=32" />
-            <AvatarFallback className="bg-indigo-100 text-indigo-600 text-sm font-medium">
-              JD
-            </AvatarFallback>
+            {userProfile?.picture ? (
+              <AvatarImage
+                src={userProfile.picture}
+                alt={userProfile.full_name || userProfile.email}
+              />
+            ) : (
+              <AvatarFallback className="bg-indigo-100 text-indigo-600 text-sm font-medium">
+                {userProfile
+                  ? getInitials(userProfile.full_name, userProfile.email)
+                  : "?"}
+              </AvatarFallback>
+            )}
           </Avatar>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">
-                John Doe
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge
-                  variant="outline"
-                  className="text-xs bg-red-50 text-red-700 border-red-200"
-                >
-                  Reconnect Google
-                </Badge>
-              </div>
+              {userProfile ? (
+                <>
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {getDisplayName(userProfile)}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    {authStatus === "error" ? (
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-red-50 text-red-700 border-red-200"
+                      >
+                        Reconnect Google
+                      </Badge>
+                    ) : authStatus === "ok" ? (
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-green-50 text-green-700 border-green-200"
+                      >
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-gray-50 text-gray-700 border-gray-200"
+                      >
+                        Loading...
+                      </Badge>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-gray-500 truncate">
+                    Loading profile...
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Badge
+                      variant="outline"
+                      className="text-xs bg-gray-50 text-gray-700 border-gray-200"
+                    >
+                      Loading...
+                    </Badge>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

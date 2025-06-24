@@ -15,6 +15,7 @@ from services.drive_client import ensure_drive_watch
 from services import drive_client
 from core.logging import logger
 from core.security import get_current_user
+from googleapiclient.discovery import build
 # from services.auth_helper import check_user_has_required_scopes, get_missing_scopes, force_reauthentication_url
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -103,32 +104,51 @@ async def auth_google_callback(
 
 @router.get("/check-permissions")
 async def check_user_permissions(
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-):
+) -> dict:
     """
-    Check if the current user has all required permissions for task/calendar integration.
-    Returns re-authentication URL if permissions are missing.
+    Check if the user has proper Google API permissions.
+    If not, return reauthentication URL.
     """
     try:
-        logger.info("Checking permissions for user: {}", current_user.email)
+        creds = drive_client._credentials_from_user(current_user)
+        # Test the credentials by making a simple API call
+        service = build("drive", "v3", credentials=creds, cache_discovery=False)
+        service.about().get(fields="user").execute()
         
-        # For now, assume user has permissions if they are authenticated
-        # In a real app, you'd check the actual OAuth scopes stored with the user
         return {
             "status": "ok",
-            "message": f"User {current_user.email} has all required permissions",
-            "needs_reauthentication": False
+            "message": "User has proper permissions"
         }
-            
     except Exception as e:
-        logger.exception(f"Error checking user permissions: {e}")
+        logger.warning("User {} needs reauthentication: {}", current_user.email, e)
+        
+        # Generate reauthentication URL
+        auth_url = _build_google_auth_url(request.base_url)
+        
         return {
             "status": "error",
-            "message": "Failed to check permissions",
+            "message": "Authentication required",
             "needs_reauthentication": True,
-            "reauthentication_url": f"{str(settings.API_BASE_URL).rstrip('/')}/api/v1/auth/google"
+            "missing_scopes": ["drive", "tasks", "calendar"],
+            "reauthentication_url": auth_url
         }
+
+
+@router.get("/user")
+async def get_user_profile(
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """Get the current user's profile information"""
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "picture": current_user.picture,
+        "created_at": current_user.created_at
+    }
 
 
 @router.get("/error")

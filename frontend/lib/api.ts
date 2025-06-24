@@ -20,6 +20,14 @@ export interface AuthResponse {
   reauthentication_url?: string
 }
 
+export interface UserProfile {
+  id: number
+  email: string
+  full_name: string | null
+  picture: string | null
+  created_at: string
+}
+
 export interface CalendarEvent {
   id: string
   title: string
@@ -98,6 +106,11 @@ class ApiService {
   // Check user authentication status
   async checkAuth(): Promise<AuthResponse> {
     return this.request<AuthResponse>('/api/v1/auth/check-permissions')
+  }
+
+  // Get current user profile
+  async getUserProfile(): Promise<UserProfile> {
+    return this.request<UserProfile>('/api/v1/auth/user')
   }
 
   // Get OAuth URL for Google authentication
