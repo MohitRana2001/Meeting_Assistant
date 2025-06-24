@@ -1,17 +1,20 @@
 # Meeting Assistant
 
-An intelligent meeting assistant that automatically extracts tasks from meeting recordings and integrates with Google Tasks and Calendar.
+An intelligent meeting assistant that automatically extracts tasks from meeting recordings and integrates with Google Tasks and Calendar. Features a modern React frontend with a FastAPI backend.
 
 ## 🚀 Features
 
+- **Modern Web Interface**: Beautiful landing page and dashboard built with Next.js and Tailwind CSS
 - **Automatic Meeting Processing**: Processes meeting recordings from Google Drive
 - **AI-Powered Task Extraction**: Uses Gemini AI to extract actionable tasks with assignees and due dates
 - **Google Integration**: Automatically creates tasks in Google Tasks and calendar events
 - **Real-time Processing**: Webhook-based processing for instant task creation
 - **Multi-format Support**: Supports Google Docs, Word documents, and plain text files
+- **Responsive Design**: Works seamlessly on desktop and mobile devices
 
 ## 🏗️ Architecture
 
+- **Frontend**: Next.js 15 with TypeScript, Tailwind CSS, and shadcn/ui components
 - **Backend**: FastAPI with SQLModel for database operations
 - **AI**: Google Gemini for intelligent task extraction
 - **Google APIs**: Drive, Tasks, and Calendar integration
@@ -20,6 +23,7 @@ An intelligent meeting assistant that automatically extracts tasks from meeting 
 
 ## 📋 Prerequisites
 
+- Node.js 18+ and npm/pnpm
 - Python 3.9+
 - Redis server
 - Google Cloud Project with APIs enabled:
@@ -37,26 +41,29 @@ An intelligent meeting assistant that automatically extracts tasks from meeting 
    cd meeting-assistant
    ```
 
-2. **Set up the backend**
+2. **Install all dependencies**
 
    ```bash
-   cd backend
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
+   npm run install:all
    ```
 
 3. **Configure environment variables**
 
    ```bash
+   # Backend environment
+   cd backend
    cp .env.example .env
    # Edit .env with your Google Cloud credentials
+
+   # Frontend environment
+   cd ../frontend
+   echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
    ```
 
 4. **Set up the database**
 
    ```bash
-   alembic upgrade head
+   npm run setup
    ```
 
 5. **Start Redis server**
@@ -65,16 +72,23 @@ An intelligent meeting assistant that automatically extracts tasks from meeting 
    redis-server
    ```
 
-6. **Start the Celery worker**
+6. **Start the Celery worker (in a new terminal)**
 
    ```bash
+   cd backend
    celery -A workers.task worker --loglevel=info
    ```
 
-7. **Start the FastAPI server**
+7. **Start both frontend and backend**
+
    ```bash
-   uvicorn main:app --reload
+   npm run dev
    ```
+
+This will start:
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
 
 ## 🔧 Configuration
 
@@ -96,6 +110,8 @@ An intelligent meeting assistant that automatically extracts tasks from meeting 
 
 ### Environment Variables
 
+**Backend (.env)**
+
 ```env
 GOOGLE_CLIENT_ID=your_client_id
 GOOGLE_CLIENT_SECRET=your_client_secret
@@ -105,30 +121,66 @@ REDIS_URL=redis://localhost:6379/0
 API_BASE_URL=http://localhost:8000
 ```
 
+**Frontend (.env.local)**
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
 ## 📖 Usage
 
-1. **Authenticate with Google**
+1. **Visit the landing page**
 
-   - Visit `/api/v1/auth/google` to start OAuth flow
-   - Grant required permissions
+   - Open http://localhost:3000
+   - Explore the features and testimonials
+   - Click "Get Started Free" to begin
 
-2. **Upload Meeting Recordings**
+2. **Authenticate with Google**
+
+   - The system will redirect you to Google OAuth
+   - Grant required permissions for Drive, Tasks, and Calendar
+
+3. **Access the dashboard**
+
+   - After authentication, you'll be redirected to the dashboard
+   - View your meeting summaries and extracted tasks
+   - Click on any summary to see details and manage tasks
+
+4. **Upload Meeting Recordings**
 
    - Upload meeting recordings to Google Drive
    - Place them in the "Meet Recordings" folder
    - The system will automatically process them
 
-3. **View Results**
+5. **View Results**
    - Check Google Tasks for extracted tasks
    - Check Google Calendar for scheduled events
-   - View summaries via the API
+   - View summaries via the dashboard
 
 ## 🔌 API Endpoints
 
 - `GET /api/v1/auth/google` - Start OAuth flow
 - `GET /api/v1/auth/google/callback` - OAuth callback
-- `GET /api/v1/summaries` - Get meeting summaries
+- `GET /api/v1/auth/check-permissions` - Check user permissions
+- `GET /api/v1/meetings/summaries` - Get meeting summaries
 - `POST /api/v1/drive/webhook` - Google Drive webhook
+
+## 🎨 Frontend Structure
+
+```
+frontend/
+├── app/                    # Next.js app directory
+│   ├── page.tsx           # Landing page
+│   └── dashboard/         # Dashboard route
+├── components/            # Reusable components
+│   ├── ui/               # shadcn/ui components
+│   ├── sidebar.tsx       # Navigation sidebar
+│   ├── top-bar.tsx       # Top navigation bar
+│   └── ...               # Other components
+├── lib/                  # Utilities and services
+│   └── api.ts           # API service functions
+└── dashboard.tsx         # Main dashboard component
+```
 
 ## 🤖 AI Task Extraction
 
@@ -149,24 +201,40 @@ The system uses Google Gemini AI to intelligently extract tasks from meeting tra
 5. **Task Extraction**: Identifies tasks, assignees, and due dates
 6. **Google Integration**: Creates tasks and calendar events
 7. **Database Storage**: Saves summary and task information
+8. **Frontend Display**: Real-time updates in the dashboard
 
 ## 🧪 Testing
 
 ```bash
-# Run tests
+# Run backend tests
+cd backend
 pytest
+
+# Run frontend tests
+cd frontend
+npm test
 
 # Test specific functionality
 python -m pytest tests/test_task_extraction.py
 ```
 
-## 📝 Contributing
+## 📝 Development
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+### Available Scripts
+
+- `npm run dev` - Start both frontend and backend in development mode
+- `npm run dev:frontend` - Start only the frontend
+- `npm run dev:backend` - Start only the backend
+- `npm run build` - Build the frontend for production
+- `npm run install:all` - Install all dependencies
+- `npm run setup` - Setup database and install dependencies
+
+### Code Structure
+
+- **Frontend**: Modern React with TypeScript, using Next.js 15 app router
+- **Backend**: FastAPI with async/await patterns and SQLModel ORM
+- **Database**: SQLite with Alembic migrations for schema management
+- **Styling**: Tailwind CSS with shadcn/ui component library
 
 ## 📄 License
 

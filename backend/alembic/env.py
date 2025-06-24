@@ -1,4 +1,6 @@
 from logging.config import fileConfig
+import os
+from dotenv import load_dotenv
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -6,6 +8,9 @@ from sqlalchemy import pool
 from alembic import context
 from sqlmodel import SQLModel
 from models import user  # noqa: F401  (import all models)
+
+# Load environment variables
+load_dotenv()
 
 target_metadata = SQLModel.metadata
 
@@ -22,7 +27,6 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = None
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -42,7 +46,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./app.db")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -61,6 +65,12 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # Get the database URL from environment or use default
+    database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./app.db")
+    
+    # Update the config with the actual database URL
+    config.set_main_option("sqlalchemy.url", database_url)
+    
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

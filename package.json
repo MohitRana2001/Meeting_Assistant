@@ -1,0 +1,20 @@
+{
+  "name": "meeting-assistant",
+  "version": "1.0.0",
+  "description": "Meeting Assistant with Google Integration",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "install:all": "cd frontend && npm install && cd ../backend && pip install -r requirements.txt",
+    "setup": "npm run install:all && cd backend && alembic upgrade head"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ]
+} 
