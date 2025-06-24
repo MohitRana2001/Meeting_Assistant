@@ -28,6 +28,10 @@ class _Settings(BaseSettings):
     SECRET_KEY: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
 
+    # Gemini
+    GEMINI_API_KEY: str | None = None          # set this in .env / secrets manager
+    GEMINI_MODEL: str = "gemini-1.5-pro-latest"  # or "gemini-pro"
+
     # Database (Phase 2)
     DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
 
@@ -40,6 +44,14 @@ class _Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
+
+     # ─── Drive push – channel lasts up to 7 days ────────────────
+    DRIVE_CHANNEL_TTL_HOURS: int = 168         # 7 days
+    DRIVE_WEBHOOK_PATH: str = "/api/v1/webhooks/drive"  # local path
+
+    @property
+    def drive_webhook_address(self) -> str:    # full public URL
+        return f"{self.API_BASE_URL}{self.DRIVE_WEBHOOK_PATH}"
 
 
 settings = _Settings()  # Singleton

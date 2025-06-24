@@ -15,3 +15,7 @@ htmlcov/
 
 # Containers
 *.log
+
+# Database
+*.db
+app.db

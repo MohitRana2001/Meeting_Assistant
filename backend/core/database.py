@@ -5,11 +5,19 @@ Async SQLModel engine and session maker.
 from sqlmodel import SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
 
 from core.config import settings
 
 engine = create_async_engine(
     settings.DATABASE_URL,
+    echo=settings.ENV == "development",
+    pool_pre_ping=True,
+)
+
+# Add this for sync usage:
+sync_engine = create_engine(
+    settings.DATABASE_URL.replace("+aiosqlite", ""),  # for SQLite, remove 'aiosqlite'
     echo=settings.ENV == "development",
     pool_pre_ping=True,
 )

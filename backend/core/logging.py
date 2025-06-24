@@ -24,3 +24,14 @@ def configure_logging() -> None:
                "| <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> "
                "- <level>{message}</level>",
     )
+
+    logger.add(
+        "logs/meetingmate_{time:YYYY-MM-DD}.log",
+        rotation="00:00",  # midnight
+        retention="7 days",
+        compression="zip",
+        level="DEBUG",      # keep everything for post-mortem
+        enqueue=True,
+        backtrace=False,
+    )
+

@@ -1,19 +1,28 @@
-"""
-Phase 1 provides a placeholder route returning a static list.
+from typing import List
 
-Phase 3 will query DB and Phase 4 will enrich with agent output.
-"""
+from fastapi import APIRouter, Depends
+from sqlmodel import Session, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter
-from typing import List, Dict, Union
+from core.database import get_session
+from models.summary import MeetingSummary
+from core.logging import logger
 
-router = APIRouter(prefix="/meetings")
+router = APIRouter(prefix="/meetings", tags=["Meetings"])
 
 
-@router.get("/summaries")
-async def list_summaries() -> List[Dict[str, Union[str, List[str]]]]:
-    # --- Phase 1 dummy payload ---
+@router.get("/summaries", response_model=List[dict])
+async def list_summaries(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    result = await session.execute(select(MeetingSummary))
+    rows = result.scalars().all()
+    logger.info("[API] GET /summaries  returned {} rows", len(rows))
     return [
-        {"id": "sample-1", "title": "Kick-off call", "tasks": []},
-        {"id": "sample-2", "title": "Sprint review", "tasks": ["Refactor API"]},
+        {
+            "id": r.id,
+            "title": r.title,
+            "summary": r.summary_text,
+            "tasks": r.tasks,
+            "createdAt": r.created_at,
+        }
+        for r in rows
     ]
