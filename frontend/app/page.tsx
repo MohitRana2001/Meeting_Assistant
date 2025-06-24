@@ -31,6 +31,9 @@ export default function LandingPage() {
   const [currentTestimonial, setCurrentTestimonial] = useState(0);
   const [isAnnual, setIsAnnual] = useState(false);
 
+  // Get the backend API URL from environment
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 50);
@@ -121,7 +124,7 @@ export default function LandingPage() {
                   Dashboard
                 </Button>
               </Link>
-              <Link href="/api/v1/auth/google">
+              <Link href={`${API_URL}/api/v1/auth/google`}>
                 <Button className="bg-gradient-to-r from-indigo-600 to-emerald-500 hover:from-indigo-700 hover:to-emerald-600">
                   Get Started Free
                 </Button>
@@ -167,7 +170,7 @@ export default function LandingPage() {
                   Dashboard
                 </Button>
               </Link>
-              <Link href="/api/v1/auth/google">
+              <Link href={`${API_URL}/api/v1/auth/google`}>
                 <Button className="w-full bg-gradient-to-r from-indigo-600 to-emerald-500 hover:from-indigo-700 hover:to-emerald-600">
                   Get Started Free
                 </Button>
@@ -198,7 +201,7 @@ export default function LandingPage() {
               </p>
 
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <Link href="/api/v1/auth/google">
+                <Link href={`${API_URL}/api/v1/auth/google`}>
                   <Button
                     size="lg"
                     className="bg-gradient-to-r from-indigo-600 to-emerald-500 hover:from-indigo-700 hover:to-emerald-600 text-white px-8 py-4 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300"
@@ -424,7 +427,7 @@ export default function LandingPage() {
             Join thousands of teams who are already saving time and improving
             productivity with MeetingMate.
           </p>
-          <Link href="/api/v1/auth/google">
+          <Link href={`${API_URL}/api/v1/auth/google`}>
             <Button
               size="lg"
               className="bg-white text-indigo-600 hover:bg-gray-100 px-8 py-4 text-lg font-semibold"
