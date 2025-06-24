@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from sqlmodel import Field, SQLModel, Column, DateTime, JSON, ForeignKey
 
@@ -11,7 +11,8 @@ class MeetingSummary(SQLModel, table=True):
     title: Optional[str] = None
 
     summary_text: str
-    tasks: List[str] = Field(sa_column=Column(JSON))
+    # Store tasks as array of objects with id, text, completed fields
+    tasks: List[Dict[str, Any]] = Field(sa_column=Column(JSON), default=[])
 
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
