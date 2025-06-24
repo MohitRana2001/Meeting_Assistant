@@ -36,41 +36,49 @@ async def ensure_drive_watch(user: User) -> None:
     """
     Idempotently ensure there is a valid watch channel for the given user.
     Stores channel info back to the user object if it had to renew.
+    
+    NOTE: Commented out for local development - no webhooks needed.
     """
-    if (
-        user.drive_channel_id
-        and user.drive_channel_expire_at
-        and user.drive_channel_expire_at > datetime.utcnow() + timedelta(hours=24)
-    ):
-        return  # still valid for >24 h
+    # Webhook functionality disabled for local development
+    # No ngrok or public URL required
+    logger.info("Drive watch disabled for local development (user: {})", user.email)
+    return
+    
+    # ORIGINAL WEBHOOK CODE (commented out for local development):
+    # if (
+    #     user.drive_channel_id
+    #     and user.drive_channel_expire_at
+    #     and user.drive_channel_expire_at > datetime.utcnow() + timedelta(hours=24)
+    # ):
+    #     return  # still valid for >24 h
 
-    creds = _credentials_from_user(user)
-    service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    # creds = _credentials_from_user(user)
+    # service = build("drive", "v3", credentials=creds, cache_discovery=False)
 
-    # 1. get latest page token
-    start_page_token = (
-        service.changes().getStartPageToken().execute().get("startPageToken")
-    )
+    # # 1. get latest page token
+    # start_page_token = (
+    #     service.changes().getStartPageToken().execute().get("startPageToken")
+    # )
 
-    # 2. create channel
-    channel_id = str(uuid.uuid4())
-    body = {
-        "id": channel_id,
-        "type": "web_hook",
-        "address": settings.drive_webhook_address,
-        "token": str(user.id),  # echoed in notifications for easy lookup
-        "payload": False,
-    }
-    resp = service.changes().watch(body=body, pageToken=start_page_token).execute()
-    logger.info("Registered Drive watch for user {} (channel {})", user.email, channel_id)
+    # # 2. create channel
+    # channel_id = str(uuid.uuid4())
+    # body = {
+    #     "id": channel_id,
+    #     "type": "web_hook",
+    #     "address": settings.drive_webhook_address,
+    #     "token": str(user.id),  # echoed in notifications for easy lookup
+    #     "payload": False,
+    # }
+    # resp = service.changes().watch(body=body, pageToken=start_page_token).execute()
+    # logger.info("Registered Drive watch for user {} (channel {})", user.email, channel_id)
 
-    # 3. update user
-    user.drive_channel_id = resp["id"]
-    user.drive_page_token = start_page_token
-    # `expiration` is ms‑since‑epoch string
-    user.drive_channel_expire_at = datetime.fromtimestamp(
-        int(resp["expiration"]) / 1000, tz=timezone.utc
-    )
+    # # 3. update user
+    # user.drive_channel_id = resp["id"]
+    # user.drive_page_token = start_page_token
+    # # `expiration` is ms‑since‑epoch string
+    # user.drive_channel_expire_at = datetime.fromtimestamp(
+    #     int(resp["expiration"]) / 1000, tz=timezone.utc
+    # )
 
 
 def parse_drive_headers(headers: dict[str, str]) -> dict[str, str]:
