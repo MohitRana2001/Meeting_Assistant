@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/sheet";
 import { ExternalLink, CheckCircle2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { MeetingSummary } from "@/lib/api";
+import { MeetingSummary, apiService } from "@/lib/api";
 
 interface DetailsDrawerProps {
   summary: MeetingSummary | null;
@@ -25,6 +25,29 @@ export function DetailsDrawer({
   onClose,
   onTaskToggle,
 }: DetailsDrawerProps) {
+  const handleOpenInGoogleTasks = async () => {
+    if (!summary) return;
+
+    try {
+      // First, attempt to sync tasks to Google Tasks
+      const syncResult = await apiService.syncTasksToGoogle(summary.id);
+
+      if (syncResult.success && syncResult.taskListUrl) {
+        // If we have a direct task list URL, open that
+        window.open(syncResult.taskListUrl, "_blank");
+      } else {
+        // Fallback to general Google Tasks URL
+        window.open("https://tasks.google.com", "_blank");
+      }
+
+      console.log("Opening Google Tasks for summary:", summary.id);
+    } catch (error) {
+      console.error("Failed to sync tasks to Google Tasks:", error);
+      // Still open Google Tasks even if sync fails
+      window.open("https://tasks.google.com", "_blank");
+    }
+  };
+
   if (!summary) return null;
 
   return (
@@ -106,6 +129,7 @@ export function DetailsDrawer({
             <Button
               variant="outline"
               className="w-full bg-white hover:bg-gray-50"
+              onClick={handleOpenInGoogleTasks}
             >
               <ExternalLink className="mr-2 h-4 w-4" />
               View in Google Tasks
