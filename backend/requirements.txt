@@ -17,7 +17,6 @@ httpx==0.27.0
 sqlmodel==0.0.16
 asyncpg==0.29.0
 aiosqlite==0.20.0
-greenlet==3.0.3
 
 # Background jobs (Phase 3+)
 celery==5.4.0
@@ -42,8 +41,5 @@ cryptography>=42.0.4          # for Fernet encryption
 python-multipart==0.0.9       # FastAPI redirection helper
 
 python-dateutil==2.9.0.post0 
-tiktoken==0.6.0
 google-generativeai==0.5.4
-python-docx 
-
-python-3.11.9
+python-docx
