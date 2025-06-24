@@ -105,6 +105,9 @@ def process_drive_notification(header_map: dict[str, str]) -> str:
             # First, create basic summary for database storage
             summary_dict = summarise_transcript(content)
             
+            # Initialize tasks in the correct format
+            formatted_tasks = []
+            
             # Then, process for Google Tasks and Calendar integration
             try:
                 creds = drive_client._credentials_from_user(user)
@@ -117,15 +120,37 @@ def process_drive_notification(header_map: dict[str, str]) -> str:
                     google_result['events_created']
                 )
                 
-                # Update the tasks list with the extracted tasks from Google integration
+                # Use tasks from Google integration if available
                 if google_result['extracted_tasks']:
-                    # Convert the detailed task objects to simple strings for database storage
-                    task_strings = [task['description'] for task in google_result['extracted_tasks']]
-                    summary_dict['tasks'] = task_strings
+                    for i, task in enumerate(google_result['extracted_tasks']):
+                        formatted_tasks.append({
+                            "id": str(i + 1),
+                            "text": task['description'],
+                            "completed": False
+                        })
+                else:
+                    # Fallback to basic summarizer tasks if no Google tasks
+                    basic_tasks = summary_dict.get('tasks', [])
+                    for i, task_text in enumerate(basic_tasks):
+                        formatted_tasks.append({
+                            "id": str(i + 1),
+                            "text": task_text,
+                            "completed": False
+                        })
                     
             except Exception as e:
                 logger.exception("Failed to process Google integration: {}", e)
-                # Continue with basic summary if Google integration fails
+                # Fallback to basic summarizer tasks if Google integration fails
+                basic_tasks = summary_dict.get('tasks', [])
+                for i, task_text in enumerate(basic_tasks):
+                    formatted_tasks.append({
+                        "id": str(i + 1),
+                        "text": task_text,
+                        "completed": False
+                    })
+
+            # Always ensure tasks are in the correct format
+            summary_dict['tasks'] = formatted_tasks
 
             summary_row = MeetingSummary(
                 user_id=user.id,
