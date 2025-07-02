@@ -75,55 +75,27 @@ export function CalendarView() {
           `Loaded ${allTasks.length} tasks from ${summaries.length} meeting summaries`
         );
       } catch (apiError) {
-        console.log("Failed to load real tasks, using calendar API fallback");
+        console.error("Failed to load tasks from meeting summaries:", apiError);
+        setError("Failed to load meeting tasks. Please try again.");
       }
 
-      // Try to fetch real calendar events from API (fallback to mock)
+      // Fetch real calendar events from Google Calendar API
       try {
         const realEvents = await apiService.getCalendarEvents();
-        if (realEvents && realEvents.length > 0) {
-          setEvents(realEvents);
-          return;
-        }
+        setEvents(realEvents);
+        console.log(
+          `Loaded ${realEvents.length} calendar events from Google Calendar`
+        );
       } catch (apiError) {
-        console.log("API not available, using mock data");
+        console.error("Failed to load calendar events:", apiError);
+        setError(
+          "Failed to load calendar events. Please check your Google Calendar permissions and try again."
+        );
+        setEvents([]); // Set empty array instead of fallback mock data
       }
-
-      // Fallback to mock data if API is not available
-      const mockEvents: CalendarEvent[] = [
-        {
-          id: "1",
-          title: "Product Planning Meeting",
-          start: "2024-01-15T10:00:00Z",
-          end: "2024-01-15T11:00:00Z",
-          attendees: 5,
-          meetingType: "Google Meet",
-          hasRecording: true,
-        },
-        {
-          id: "2",
-          title: "Sprint Retrospective",
-          start: "2024-01-15T14:00:00Z",
-          end: "2024-01-15T15:00:00Z",
-          attendees: 8,
-          meetingType: "Google Meet",
-          hasRecording: false,
-        },
-        {
-          id: "3",
-          title: "Client Check-in",
-          start: "2024-01-16T09:00:00Z",
-          end: "2024-01-16T09:30:00Z",
-          attendees: 3,
-          meetingType: "Google Meet",
-          hasRecording: true,
-        },
-      ];
-
-      setEvents(mockEvents);
     } catch (err) {
       console.error("Failed to load calendar data:", err);
-      setError("Failed to load calendar data");
+      setError("Failed to load calendar data. Please try again.");
     } finally {
       setLoading(false);
     }

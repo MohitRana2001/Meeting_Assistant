@@ -36,6 +36,21 @@ export interface CalendarEvent {
   attendees?: number
   meetingType?: string
   hasRecording?: boolean
+  meetingLink?: string
+}
+
+export interface Notification {
+  id: string
+  type: string
+  title: string
+  message: string
+  timestamp: string
+  read: boolean
+  metadata?: {
+    summaryId?: string
+    summaryTitle?: string
+    taskCount?: number
+  }
 }
 
 class ApiService {
@@ -173,6 +188,38 @@ class ApiService {
     } catch (error) {
       console.error('Failed to create calendar event:', error);
       return { success: false };
+    }
+  }
+
+  // Notifications
+  async getNotifications(limit?: number): Promise<Notification[]> {
+    try {
+      const endpoint = limit ? `/api/v1/notifications/?limit=${limit}` : '/api/v1/notifications/';
+      return await this.request<Notification[]>(endpoint);
+    } catch (error) {
+      console.error('Failed to get notifications:', error);
+      return [];
+    }
+  }
+
+  async getUnreadNotificationCount(): Promise<{ unreadCount: number }> {
+    try {
+      return await this.request<{ unreadCount: number }>('/api/v1/notifications/unread-count');
+    } catch (error) {
+      console.error('Failed to get unread notification count:', error);
+      return { unreadCount: 0 };
+    }
+  }
+
+  async markNotificationRead(notificationId: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      return await this.request<{ success: boolean; message?: string }>(
+        `/api/v1/notifications/${notificationId}/mark-read`,
+        { method: 'POST' }
+      );
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+      return { success: false, message: 'Failed to mark notification as read' };
     }
   }
 

@@ -216,18 +216,18 @@ export default function Dashboard() {
 
   // Simulate real-time updates
   useEffect(() => {
-    const interval = setInterval(() => {
-      // Randomly show toast notification
-      if (
-        Math.random() > 0.7 &&
-        summaries.length > 0 &&
-        activeView === "dashboard"
-      ) {
-        setShowToast(true);
-      }
-    }, 30000); // Every 30 seconds
-
-    return () => clearInterval(interval);
+    // Removed simulated notifications - now using real API notifications
+    // const interval = setInterval(() => {
+    //   // Randomly show toast notification
+    //   if (
+    //     Math.random() > 0.7 &&
+    //     summaries.length > 0 &&
+    //     activeView === "dashboard"
+    //   ) {
+    //     setShowToast(true);
+    //   }
+    // }, 30000); // Every 30 seconds
+    // return () => clearInterval(interval);
   }, [summaries, activeView]);
 
   const isEmpty =
