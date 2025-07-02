@@ -12,6 +12,7 @@ from typing import Any, Tuple, List
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from dateutil import parser as dateparse
@@ -27,9 +28,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/calendar"
 ]
-
-
-# ─── Public helpers ──────────────────────────────────────────────────────────
 
 
 async def ensure_drive_watch(user: User) -> None:
@@ -50,7 +48,7 @@ async def ensure_drive_watch(user: User) -> None:
     #     and user.drive_channel_expire_at
     #     and user.drive_channel_expire_at > datetime.utcnow() + timedelta(hours=24)
     # ):
-    #     return  # still valid for >24 h
+    #     return # still valid for >24 h
 
     # creds = _credentials_from_user(user)
     # service = build("drive", "v3", credentials=creds, cache_discovery=False)
@@ -66,7 +64,7 @@ async def ensure_drive_watch(user: User) -> None:
     #     "id": channel_id,
     #     "type": "web_hook",
     #     "address": settings.drive_webhook_address,
-    #     "token": str(user.id),  # echoed in notifications for easy lookup
+    #     "token": str(user.id), # echoed in notifications for easy lookup
     #     "payload": False,
     # }
     # resp = service.changes().watch(body=body, pageToken=start_page_token).execute()
@@ -95,28 +93,66 @@ def parse_drive_headers(headers: dict[str, str]) -> dict[str, str]:
     return {k.lower(): v for k, v in headers.items() if k.lower() in wanted}
 
 
-def list_changes(
-    user: User,
-) -> Tuple[List[dict[str, Any]], str]:
+def list_changes(user: User) -> Tuple[List[dict[str, Any]], str]:
     """
-    Return list of Drive changes since last `drive_page_token`
-    and the new startPageToken to save.
+    Return a list of all Drive changes since the last `drive_page_token`
+    and the new startPageToken to save for the next run.
+
+    This function correctly handles initial sync and pagination.
     """
     creds = _credentials_from_user(user)
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
 
-    results = (
-        service.changes()
-        .list(
-            pageToken=user.drive_page_token,
-            spaces="drive",
-            fields="nextPageToken,newStartPageToken,changes(file(id,name,mimeType,trashed,modifiedTime))",
-        )
-        .execute()
-    )
-    changes = results.get("changes", [])
-    new_token = results.get("newStartPageToken") or user.drive_page_token
-    return changes, new_token
+    page_token = user.drive_page_token
+
+    # --- 1. Handle Initial Sync ---
+    # If the user has no token, we must get a starting point.
+    if not page_token:
+        logger.info("No page token for user {}, performing first-time sync setup.", user.email)
+        response = service.changes().getStartPageToken().execute()
+        start_token = response.get('startPageToken')
+        # On the first run, there are no "changes" to return.
+        # We return the new token so it can be saved for the next sync.
+        return [], start_token
+
+    # --- 2. Fetch Changes with Pagination ---
+    all_changes = []
+    logger.info("Fetching changes for user {} starting from token: {}", user.email, page_token)
+    
+    while page_token:
+        try:
+            response = (
+                service.changes()
+                .list(
+                    pageToken=page_token,
+                    spaces="drive",
+                    # Add 'parents' to fields since your refresh function uses it.
+                    fields="nextPageToken, newStartPageToken, changes(file(id, name, mimeType, trashed, modifiedTime, parents))",
+                )
+                .execute()
+            )
+            
+            all_changes.extend(response.get("changes", []))
+            
+            # Move to the next page if one exists
+            if "nextPageToken" in response:
+                page_token = response["nextPageToken"]
+            else:
+                # This was the last page. Get the final token for the next sync.
+                page_token = response.get("newStartPageToken")
+                # The loop will naturally end here as page_token might be None
+                # or it will be the newStartPageToken which we want to return.
+                break
+
+        except HttpError as error:
+            logger.error("An HttpError occurred: {}. Token may be invalid.", error)
+            # This can happen if the token expires. Resetting by getting a new start token.
+            response = service.changes().getStartPageToken().execute()
+            new_token = response.get('startPageToken')
+            return [], new_token # Reset the process
+
+    final_token = page_token or user.drive_page_token
+    return all_changes, final_token
 
 
 def download_plain_text(file_id: str, creds: Credentials) -> Tuple[str, str]:
@@ -171,7 +207,7 @@ def download_plain_text(file_id: str, creds: Credentials) -> Tuple[str, str]:
         raise ValueError(f"Unsupported mime type: {mime}")
 
 
-# ─── internal helpers ────────────────────────────────────────────────────────
+# ─── internal helpers ─────────────────────────────────────────────────────────
 
 
 def _credentials_from_user(user: User) -> Credentials:
@@ -194,8 +230,8 @@ def find_meet_folder_id(creds) -> str | None:
         service.files()
         .list(
             q="name = 'Meet Recordings' "
-              "and mimeType = 'application/vnd.google-apps.folder' "
-              "and trashed = false",
+            "and mimeType = 'application/vnd.google-apps.folder' "
+            "and trashed = false",
             spaces="drive",
             fields="files(id)",
             pageSize=1,
@@ -204,3 +240,4 @@ def find_meet_folder_id(creds) -> str | None:
     )
     files = resp.get("files", [])
     return files[0]["id"] if files else None
+
