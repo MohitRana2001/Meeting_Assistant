@@ -19,6 +19,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
 def _client_config() -> Dict[str, Any]:

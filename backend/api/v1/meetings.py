@@ -13,6 +13,7 @@ from core.logging import logger
 from services import drive_client
 from services.summarizer import summarise_transcript
 from services.task_extractor import process_meeting_for_tasks
+from services import gmail_client
 
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
 
@@ -20,66 +21,89 @@ class TaskUpdateRequest(BaseModel):
     task_id: str
     completed: bool
 
-@router.get("/summaries", response_model=List[dict])
-async def list_summaries(
+@router.get("/summaries")
+async def get_summaries(
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
-) -> list[dict]:
-    """Get meeting summaries for the authenticated user"""
-    # Filter summaries by the current user's ID
-    result = await session.execute(
-        select(MeetingSummary).where(MeetingSummary.user_id == current_user.id)
-    )
-    rows = result.scalars().all()
-    logger.info("[API] GET /summaries for user {} returned {} rows", current_user.email, len(rows))
+) -> List[dict]:
+    """Get all meeting summaries for the current user"""
+    stmt = select(MeetingSummary).where(MeetingSummary.user_id == current_user.id).order_by(MeetingSummary.created_at.desc())
+    result = await session.execute(stmt)
+    summaries = result.scalars().all()
+    
     return [
         {
-            "id": r.id,
-            "title": r.title,
-            "summary": r.summary_text,
-            "tasks": r.tasks,
-            "createdAt": r.created_at,
+            "id": summary.id,
+            "title": summary.title,
+            "summary": summary.summary_text,
+            "tasks": summary.tasks,
+            "createdAt": summary.created_at.isoformat(),
+            "source": "drive"  # All database summaries are from drive
         }
-        for r in rows
+        for summary in summaries
     ]
+
+@router.get("/summaries/{summary_id}")
+async def get_summary(
+    summary_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Get a specific meeting summary"""
+    stmt = select(MeetingSummary).where(
+        MeetingSummary.id == summary_id,
+        MeetingSummary.user_id == current_user.id
+    )
+    result = await session.execute(stmt)
+    summary = result.scalar_one_or_none()
+    
+    if not summary:
+        raise HTTPException(status_code=404, detail="Summary not found")
+    
+    return {
+        "id": summary.id,
+        "title": summary.title,
+        "summary": summary.summary_text,
+        "tasks": summary.tasks,
+        "createdAt": summary.created_at.isoformat(),
+        "source": "drive"
+    }
 
 @router.post("/refresh")
 async def refresh_summaries(
     current_user: User = Depends(get_current_user)
 ) -> dict:
     """Manually refresh and process new files from Google Drive Meet Recordings folder"""
-    try:
-        logger.info("[API] Manual refresh requested by user {}", current_user.email)
-        
-        # Use sync session for this operation (similar to worker)
-        with Session(sync_engine) as session:
-            user = session.exec(
-                select(User).where(User.id == current_user.id)
-            ).one_or_none()
-            
-            if not user:
-                raise HTTPException(status_code=404, detail="User not found")
-            
-            # Get credentials and check for new files
+    
+    with Session(sync_engine) as session:
+        user = session.get(User, current_user.id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if not user.meet_folder_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="Meet Recordings folder not found. Please ensure you have a 'Meet Recordings' folder in your Google Drive."
+            )
+
+        try:
             creds = drive_client._credentials_from_user(user)
             changes, new_token = drive_client.list_changes(user)
             
             logger.info(
-                "[API] Manual refresh for user={} pageToken={} changes={}",
+                "[API] Manual refresh for user={} found {} changes",
                 user.email,
-                user.drive_page_token,
                 len(changes),
             )
-            
+
             if not changes:
-                logger.info("No new changes found")
-                user.drive_page_token = new_token
-                session.commit()
-                return {"success": True, "message": "No new files found", "summaries_created": 0}
-            
-            summaries_created = []
-            processed_count = 0
-            
+                return {
+                    "success": True,
+                    "message": "No new meeting recordings found",
+                    "summaries_created": 0
+                }
+
+            summaries_created = 0
             for change in changes:
                 file = change.get("file")
                 if not file or file.get("trashed"):
@@ -91,31 +115,35 @@ async def refresh_summaries(
                     
                 mime = file["mimeType"]
                 if mime not in ("text/plain", "application/vnd.google-apps.document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
+                    continue  # skip non‑transcript files
+
+                try:
+                    title, content = drive_client.download_plain_text(
+                        file["id"], creds
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Failed download {}", file["id"])
                     continue
-                
-                # Check if we already have this file processed
-                existing = session.exec(
+
+                # Check if summary already exists
+                existing_summary = session.exec(
                     select(MeetingSummary).where(
                         MeetingSummary.drive_file_id == file["id"],
                         MeetingSummary.user_id == user.id
                     )
                 ).first()
                 
-                if existing:
-                    logger.info("File {} already processed, skipping", file["id"])
+                if existing_summary:
+                    logger.info("Summary already exists for file {}", file["id"])
                     continue
-                
-                try:
-                    title, content = drive_client.download_plain_text(file["id"], creds)
-                except Exception as exc:
-                    logger.exception("Failed download {}", file["id"])
-                    continue
-                
-                # Create basic summary
+
+                # First, create basic summary for database storage
                 summary_dict = summarise_transcript(content)
+                
+                # Initialize tasks in the correct format
                 formatted_tasks = []
                 
-                # Process for Google Tasks and Calendar integration
+                # Then, process for Google Tasks and Calendar integration
                 try:
                     google_result = process_meeting_for_tasks(content, creds, user.email)
                     
@@ -154,68 +182,170 @@ async def refresh_summaries(
                             "text": task_text,
                             "completed": False
                         })
-                
-                # Store the summary
-                summary_dict['tasks'] = formatted_tasks
-                summary_row = MeetingSummary(
+
+                # Create summary in database
+                summary = MeetingSummary(
                     user_id=user.id,
                     drive_file_id=file["id"],
-                    title=title,
-                    summary_text=summary_dict["summary"],
-                    tasks=summary_dict["tasks"],
+                    title=summary_dict.get('title', title),
+                    summary_text=summary_dict.get('summary', ''),
+                    tasks=formatted_tasks
                 )
-                session.add(summary_row)
-                session.commit()
-                session.refresh(summary_row)
-                summaries_created.append(summary_row.id)
-                processed_count += 1
-                
-                logger.info(
-                    "[API] ✅ Processed new file: id={} title='{}' tasks={}",
-                    summary_row.id,
-                    title,
-                    len(summary_dict['tasks']),
-                )
-            
-            # Update user's page token
+                session.add(summary)
+                summaries_created += 1
+
+            # Update token
             user.drive_page_token = new_token
             session.commit()
-            
-            logger.info("[API] Manual refresh completed: {} new summaries created", processed_count)
-            
+
             return {
                 "success": True,
-                "message": f"Successfully processed {processed_count} new files",
-                "summaries_created": processed_count,
-                "summary_ids": summaries_created
+                "message": f"Successfully processed {summaries_created} new meeting recordings",
+                "summaries_created": summaries_created
             }
-            
+
+        except Exception as e:
+            logger.exception("Error during manual refresh: {}", e)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to refresh summaries from Google Drive"
+            )
+
+@router.post("/scan-gmail")
+async def scan_gmail_summaries(
+    current_user: User = Depends(get_current_user),
+    days_back: int = 7
+) -> dict:
+    """Scan Gmail for meeting summaries shared via email"""
+    try:
+        # Scan Gmail for meeting summaries
+        gmail_summaries = gmail_client.scan_gmail_for_meeting_summaries(current_user, days_back)
+        
+        if not gmail_summaries:
+            return {
+                "success": True,
+                "message": "No meeting summaries found in Gmail",
+                "summaries_found": 0,
+                "summaries": []
+            }
+        
+        # Format summaries for response
+        formatted_summaries = []
+        for summary in gmail_summaries:
+            formatted_summaries.append({
+                "id": f"gmail_{summary['email_id']}",  # Use email ID as identifier
+                "title": summary['title'],
+                "summary": summary['summary'],
+                "tasks": summary['tasks'],
+                "createdAt": summary['created_at'].isoformat(),
+                "source": "gmail",
+                "sender": summary['sender'],
+                "email_id": summary['email_id']
+            })
+        
+        logger.info(f"Found {len(gmail_summaries)} meeting summaries in Gmail for user {current_user.email}")
+        
+        return {
+            "success": True,
+            "message": f"Found {len(gmail_summaries)} meeting summaries in Gmail",
+            "summaries_found": len(gmail_summaries),
+            "summaries": formatted_summaries
+        }
+        
     except Exception as e:
-        logger.exception("Error during manual refresh: {}", e)
-        raise HTTPException(status_code=500, detail=f"Failed to refresh summaries: {str(e)}")
+        logger.exception(f"Error scanning Gmail for user {current_user.email}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to scan Gmail for meeting summaries"
+        )
+
+@router.get("/combined-summaries")
+async def get_combined_summaries(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    include_gmail: bool = True,
+    gmail_days_back: int = 7
+) -> dict:
+    """Get all meeting summaries from both Drive and Gmail"""
+    try:
+        # Get Drive summaries from database
+        stmt = select(MeetingSummary).where(MeetingSummary.user_id == current_user.id).order_by(MeetingSummary.created_at.desc())
+        result = await session.execute(stmt)
+        drive_summaries = result.scalars().all()
+        
+        all_summaries = []
+        
+        # Add Drive summaries
+        for summary in drive_summaries:
+            all_summaries.append({
+                "id": str(summary.id),
+                "title": summary.title,
+                "summary": summary.summary_text,
+                "tasks": summary.tasks,
+                "createdAt": summary.created_at.isoformat(),
+                "source": "drive"
+            })
+        
+        # Add Gmail summaries if requested
+        gmail_summaries_count = 0
+        if include_gmail:
+            try:
+                gmail_summaries = gmail_client.scan_gmail_for_meeting_summaries(current_user, gmail_days_back)
+                gmail_summaries_count = len(gmail_summaries)
+                
+                for summary in gmail_summaries:
+                    all_summaries.append({
+                        "id": f"gmail_{summary['email_id']}",
+                        "title": summary['title'],
+                        "summary": summary['summary'],
+                        "tasks": summary['tasks'],
+                        "createdAt": summary['created_at'].isoformat(),
+                        "source": "gmail",
+                        "sender": summary['sender'],
+                        "email_id": summary['email_id']
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to scan Gmail for user {current_user.email}: {e}")
+                # Don't fail the entire request if Gmail scanning fails
+        
+        # Sort all summaries by creation date (newest first)
+        all_summaries.sort(key=lambda x: x['createdAt'], reverse=True)
+        
+        return {
+            "success": True,
+            "total_summaries": len(all_summaries),
+            "drive_summaries": len(drive_summaries),
+            "gmail_summaries": gmail_summaries_count,
+            "summaries": all_summaries
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error getting combined summaries for user {current_user.email}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get meeting summaries"
+        )
 
 @router.patch("/summaries/{summary_id}/tasks/{task_id}")
 async def update_task_status(
     summary_id: int,
     task_id: str,
     task_update: TaskUpdateRequest,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
-):
-    """Update the completion status of a specific task"""
-    # Get the summary for the current user
-    result = await session.execute(
-        select(MeetingSummary).where(
-            MeetingSummary.id == summary_id,
-            MeetingSummary.user_id == current_user.id
-        )
+) -> dict:
+    """Update task completion status"""
+    stmt = select(MeetingSummary).where(
+        MeetingSummary.id == summary_id,
+        MeetingSummary.user_id == current_user.id
     )
+    result = await session.execute(stmt)
     summary = result.scalar_one_or_none()
     
     if not summary:
         raise HTTPException(status_code=404, detail="Summary not found")
     
-    # Find and update the specific task
+    # Find and update the task
     tasks = summary.tasks or []
     task_found = False
     
@@ -230,12 +360,9 @@ async def update_task_status(
     
     # Update the summary with modified tasks
     summary.tasks = tasks
-    session.add(summary)
     await session.commit()
     
-    logger.info(
-        "Updated task {} in summary {} for user {} - completed: {}",
-        task_id, summary_id, current_user.email, task_update.completed
-    )
-    
-    return {"success": True, "message": "Task updated successfully"}
+    return {
+        "success": True,
+        "message": f"Task {'completed' if task_update.completed else 'marked incomplete'}"
+    }

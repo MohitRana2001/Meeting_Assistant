@@ -10,6 +10,15 @@ export interface MeetingSummary {
     completed: boolean
   }>
   createdAt: string
+  source: 'drive' | 'gmail'
+  sender?: string
+  email_id?: string
+  attachments?: Array<{
+    filename: string
+    attachment_id: string
+    mime_type: string
+    size: number
+  }>
 }
 
 export interface AuthResponse {
@@ -53,6 +62,27 @@ export interface Notification {
   }
 }
 
+export interface GoogleTask {
+  id: string
+  title: string
+  notes: string
+  status: string
+  due?: string
+  updated: string
+  tasklist_id: string
+  tasklist_title: string
+}
+
+export interface TaskSyncResult {
+  success: boolean
+  message: string
+  tasks_synced: number
+  calendar_events_created: number
+  task_list_title?: string
+  task_list_url?: string
+  errors?: string[]
+}
+
 class ApiService {
   private baseUrl: string
 
@@ -91,9 +121,69 @@ class ApiService {
     }
   }
 
-  // Get all meeting summaries
+  // Get all meeting summaries (Drive only for backward compatibility)
   async getSummaries(): Promise<MeetingSummary[]> {
     return this.request<MeetingSummary[]>('/api/v1/meetings/summaries')
+  }
+
+  // Get combined summaries from both Drive and Gmail
+  async getCombinedSummaries(includeGmail: boolean = true, gmailDaysBack: number = 7): Promise<{
+    success: boolean;
+    total_summaries: number;
+    drive_summaries: number;
+    gmail_summaries: number;
+    summaries: MeetingSummary[];
+  }> {
+    try {
+      const params = new URLSearchParams({
+        include_gmail: includeGmail.toString(),
+        gmail_days_back: gmailDaysBack.toString()
+      });
+      
+      return await this.request<{
+        success: boolean;
+        total_summaries: number;
+        drive_summaries: number;
+        gmail_summaries: number;
+        summaries: MeetingSummary[];
+      }>(`/api/v1/meetings/combined-summaries?${params}`);
+    } catch (error) {
+      console.error('Failed to get combined summaries:', error);
+      return {
+        success: false,
+        total_summaries: 0,
+        drive_summaries: 0,
+        gmail_summaries: 0,
+        summaries: []
+      };
+    }
+  }
+
+  // Scan Gmail for meeting summaries
+  async scanGmail(daysBack: number = 7): Promise<{
+    success: boolean;
+    message: string;
+    summaries_found: number;
+    summaries: MeetingSummary[];
+  }> {
+    try {
+      return await this.request<{
+        success: boolean;
+        message: string;
+        summaries_found: number;
+        summaries: MeetingSummary[];
+      }>(`/api/v1/meetings/scan-gmail?days_back=${daysBack}`, {
+        method: 'POST'
+      });
+    } catch (error) {
+      console.error('Failed to scan Gmail:', error);
+      return {
+        success: false,
+        message: 'Failed to scan Gmail for meeting summaries',
+        summaries_found: 0,
+        summaries: []
+      };
+    }
   }
 
   // Get a specific meeting summary
@@ -114,6 +204,30 @@ class ApiService {
       return response;
     } catch (error) {
       console.error('Failed to update task status:', error);
+      return { success: false, message: 'Failed to update task status' };
+    }
+  }
+
+  // Update task completion status with Google Tasks sync
+  async updateTaskStatusWithGoogleSync(summaryId: string, taskId: string, completed: boolean): Promise<{ 
+    success: boolean; 
+    message?: string; 
+    google_task_updated?: boolean;
+  }> {
+    try {
+      const response = await this.request<{ 
+        success: boolean; 
+        message?: string; 
+        google_task_updated?: boolean;
+      }>(
+        `/api/v1/tasks/update-google-task-status/${summaryId}/${taskId}?completed=${completed}`,
+        {
+          method: 'PATCH'
+        }
+      );
+      return response;
+    } catch (error) {
+      console.error('Failed to update task status with Google sync:', error);
       return { success: false, message: 'Failed to update task status' };
     }
   }
@@ -151,17 +265,77 @@ class ApiService {
     }
   }
 
-  // Google Tasks Integration
-  async syncTasksToGoogle(summaryId: string): Promise<{ success: boolean; taskListUrl?: string }> {
+  // Google Tasks Integration - Enhanced
+  async syncTasksToGoogle(summaryId: string): Promise<TaskSyncResult> {
     try {
-      const response = await this.request<{ success: boolean; taskListUrl?: string }>(
+      const response = await this.request<TaskSyncResult>(
         `/api/v1/tasks/sync/${summaryId}`, 
         { method: 'POST' }
       );
       return response;
     } catch (error) {
       console.error('Failed to sync tasks to Google:', error);
-      return { success: false };
+      return { 
+        success: false, 
+        message: 'Failed to sync tasks to Google Tasks',
+        tasks_synced: 0,
+        calendar_events_created: 0
+      };
+    }
+  }
+
+  // Sync all recent meeting tasks to Google Tasks
+  async syncAllTasksToGoogle(limit: number = 10): Promise<TaskSyncResult & { summaries_processed: number; total_tasks_synced: number }> {
+    try {
+      const response = await this.request<TaskSyncResult & { summaries_processed: number; total_tasks_synced: number }>(
+        `/api/v1/tasks/sync-all?limit=${limit}`,
+        { method: 'POST' }
+      );
+      return response;
+    } catch (error) {
+      console.error('Failed to sync all tasks to Google:', error);
+      return {
+        success: false,
+        message: 'Failed to sync all tasks to Google Tasks',
+        tasks_synced: 0,
+        calendar_events_created: 0,
+        summaries_processed: 0,
+        total_tasks_synced: 0
+      };
+    }
+  }
+
+  // Get all user tasks from meeting summaries
+  async getUserTasks(): Promise<Array<{
+    id: string;
+    text: string;
+    completed: boolean;
+    summary_id: string;
+    summary_title: string;
+    created_at: string;
+  }>> {
+    try {
+      return await this.request<Array<{
+        id: string;
+        text: string;
+        completed: boolean;
+        summary_id: string;
+        summary_title: string;
+        created_at: string;
+      }>>('/api/v1/tasks/');
+    } catch (error) {
+      console.error('Failed to get user tasks:', error);
+      return [];
+    }
+  }
+
+  // Get tasks directly from Google Tasks
+  async getGoogleTasks(): Promise<GoogleTask[]> {
+    try {
+      return await this.request<GoogleTask[]>('/api/v1/tasks/google-tasks');
+    } catch (error) {
+      console.error('Failed to get Google Tasks:', error);
+      return [];
     }
   }
 

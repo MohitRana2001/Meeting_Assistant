@@ -12,7 +12,7 @@ import { CalendarView } from "@/components/calendar-view";
 import { SettingsView } from "@/components/settings-view";
 import { apiService, MeetingSummary } from "./lib/api";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, CheckCheck, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
@@ -30,7 +30,11 @@ export default function Dashboard() {
   const [summaries, setSummaries] = useState<MeetingSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncingTasks, setSyncingTasks] = useState(false);
+  const [scanningGmail, setScanningGmail] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [gmailSummariesCount, setGmailSummariesCount] = useState(0);
+  const [driveSummariesCount, setDriveSummariesCount] = useState(0);
 
   // Handle OAuth token from URL
   useEffect(() => {
@@ -66,8 +70,19 @@ export default function Dashboard() {
         return;
       }
 
-      const data = await apiService.getSummaries();
-      setSummaries(data);
+      // Load combined summaries (Drive + Gmail)
+      const data = await apiService.getCombinedSummaries(true, 7);
+      if (data.success) {
+        setSummaries(data.summaries);
+        setDriveSummariesCount(data.drive_summaries);
+        setGmailSummariesCount(data.gmail_summaries);
+      } else {
+        // Fallback to Drive-only summaries
+        const driveData = await apiService.getSummaries();
+        setSummaries(driveData);
+        setDriveSummariesCount(driveData.length);
+        setGmailSummariesCount(0);
+      }
     } catch (err) {
       console.error("Failed to load summaries:", err);
       setError("Failed to load meeting summaries");
@@ -92,10 +107,10 @@ export default function Dashboard() {
           setToastMessage(
             `✅ Found and processed ${result.summaries_created} new meeting${
               result.summaries_created > 1 ? "s" : ""
-            }!`
+            } from Drive!`
           );
         } else {
-          setToastMessage("✅ Sync complete - no new meetings found");
+          setToastMessage("✅ Drive sync complete - no new meetings found");
         }
         setShowToast(true);
       } else {
@@ -109,6 +124,65 @@ export default function Dashboard() {
     }
   };
 
+  const handleScanGmail = async () => {
+    try {
+      setScanningGmail(true);
+      setError(null);
+
+      const result = await apiService.scanGmail(7);
+
+      if (result.success) {
+        // Reload summaries to show Gmail + Drive summaries together
+        await loadSummaries();
+
+        if (result.summaries_found > 0) {
+          setToastMessage(
+            `📧 Found ${result.summaries_found} meeting summaries in Gmail!`
+          );
+        } else {
+          setToastMessage(
+            "📧 Gmail scan complete - no meeting summaries found"
+          );
+        }
+        setShowToast(true);
+      } else {
+        setError(result.message || "Failed to scan Gmail");
+      }
+    } catch (err) {
+      console.error("Failed to scan Gmail:", err);
+      setError("Failed to scan Gmail for meeting summaries");
+    } finally {
+      setScanningGmail(false);
+    }
+  };
+
+  const handleSyncAllTasks = async () => {
+    try {
+      setSyncingTasks(true);
+      setError(null);
+
+      const result = await apiService.syncAllTasksToGoogle(10);
+
+      if (result.success) {
+        if (result.total_tasks_synced > 0) {
+          setToastMessage(
+            `🎉 Synced ${result.total_tasks_synced} tasks from ${result.summaries_processed} meetings to Google Tasks!`
+          );
+        } else {
+          setToastMessage("✅ All tasks are already up to date");
+        }
+        setShowToast(true);
+      } else {
+        setError(result.message || "Failed to sync tasks");
+      }
+    } catch (err) {
+      console.error("Failed to sync all tasks:", err);
+      setError("Failed to sync tasks to Google Tasks");
+    } finally {
+      setSyncingTasks(false);
+    }
+  };
+
   const handleRowSelect = (summary: MeetingSummary) => {
     setSelectedSummary(summary);
     setDrawerOpen(true);
@@ -116,6 +190,15 @@ export default function Dashboard() {
 
   const handleTaskToggle = async (taskId: string) => {
     if (!selectedSummary) return;
+
+    // Only allow task toggling for Drive summaries (not Gmail ones)
+    if (selectedSummary.source === "gmail") {
+      setToastMessage(
+        "⚠️ Cannot edit tasks from Gmail summaries. Sync to Google Tasks instead!"
+      );
+      setShowToast(true);
+      return;
+    }
 
     // Find the current task to get its completion status
     const currentTask = selectedSummary.tasks.find(
@@ -138,15 +221,33 @@ export default function Dashboard() {
       prev.map((s) => (s.id === selectedSummary.id ? updatedSummary : s))
     );
 
-    // Call the API to persist the change
+    // Call the enhanced API to update both local and Google Tasks
     try {
-      const result = await apiService.updateTaskStatus(
+      const result = await apiService.updateTaskStatusWithGoogleSync(
         selectedSummary.id,
         taskId,
         newCompletedStatus
       );
 
-      if (!result.success) {
+      if (result.success) {
+        // Show different messages based on Google Tasks sync status
+        if (result.google_task_updated) {
+          setToastMessage(
+            `✅ Task ${
+              newCompletedStatus ? "completed" : "reopened"
+            } in both local and Google Tasks!`
+          );
+        } else {
+          setToastMessage(
+            `✅ Task ${
+              newCompletedStatus ? "completed" : "reopened"
+            } locally. ${
+              result.message || "Google Tasks sync may have failed."
+            }`
+          );
+        }
+        setShowToast(true);
+      } else {
         console.error("Failed to update task status:", result.message);
         // Revert the optimistic update if API call failed
         setSelectedSummary(selectedSummary);
@@ -196,19 +297,66 @@ export default function Dashboard() {
 
   const getTopBarActions = () => {
     if (activeView === "dashboard") {
+      const totalTasks = summaries.reduce(
+        (count, summary) => count + (summary.tasks?.length || 0),
+        0
+      );
+
       return (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefreshSummaries}
-          disabled={refreshing || loading}
-          className="flex items-center gap-2"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-          />
-          {refreshing ? "Syncing..." : "Sync Drive"}
-        </Button>
+        <div className="flex items-center gap-2">
+          {totalTasks > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSyncAllTasks}
+              disabled={syncingTasks || loading}
+              className="flex items-center gap-2"
+            >
+              {syncingTasks ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <CheckCheck className="h-4 w-4" />
+                  Sync All Tasks
+                </>
+              )}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleScanGmail}
+            disabled={scanningGmail || loading}
+            className="flex items-center gap-2"
+          >
+            {scanningGmail ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Scanning...
+              </>
+            ) : (
+              <>
+                <Mail className="h-4 w-4" />
+                Scan Gmail
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefreshSummaries}
+            disabled={refreshing || loading}
+            className="flex items-center gap-2"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+            {refreshing ? "Syncing..." : "Sync Drive"}
+          </Button>
+        </div>
       );
     }
     return null;
@@ -261,6 +409,28 @@ export default function Dashboard() {
             onReconnect={handleReconnect}
             onDismiss={handleDismissReconnect}
           />
+        )}
+
+        {/* Summary Stats */}
+        {summaries.length > 0 && (
+          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-blue-900">
+                  📁 Drive: {driveSummariesCount} summaries
+                </span>
+                <span className="text-sm font-medium text-blue-900">
+                  📧 Gmail: {gmailSummariesCount} summaries
+                </span>
+                <span className="text-sm font-medium text-blue-900">
+                  🔄 Total: {summaries.length} summaries
+                </span>
+              </div>
+              <div className="text-xs text-blue-600">
+                Gmail scans last 7 days for shared meeting summaries
+              </div>
+            </div>
+          </div>
         )}
 
         {error && (
