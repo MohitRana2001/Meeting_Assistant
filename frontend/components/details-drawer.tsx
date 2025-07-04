@@ -135,7 +135,7 @@ export function DetailsDrawer({
                 </div>
 
                 {/* Google Tasks Sync Section */}
-                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                {/* <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <CheckCheck className="h-5 w-5 text-blue-600" />
@@ -200,7 +200,7 @@ export function DetailsDrawer({
                   <p className="text-xs text-blue-600 mt-2">
                     Create tasks in your Google Tasks app for easy mobile access
                   </p>
-                </div>
+                </div> */}
 
                 {/* Tasks List */}
                 <div className="space-y-3">

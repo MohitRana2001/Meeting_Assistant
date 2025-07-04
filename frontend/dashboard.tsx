@@ -8,12 +8,13 @@ import { DetailsDrawer } from "./components/details-drawer";
 import { ToastNotification } from "./components/toast-notification";
 import { EmptyState } from "./components/empty-state";
 import { ReconnectBanner } from "./components/reconnect-banner";
-import { CalendarView } from "@/components/calendar-view";
-import { SettingsView } from "@/components/settings-view";
+import { CalendarView } from "./components/calendar-view";
+import { SettingsView } from "./components/settings-view";
 import { apiService, MeetingSummary } from "./lib/api";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RefreshCw, CheckCheck, Mail } from "lucide-react";
+import { RefreshCw, CheckCheck, Mail, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "./components/ui/input";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -35,6 +36,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [gmailSummariesCount, setGmailSummariesCount] = useState(0);
   const [driveSummariesCount, setDriveSummariesCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Handle OAuth token from URL
   useEffect(() => {
@@ -52,10 +54,19 @@ export default function Dashboard() {
 
   // Load summaries from API
   useEffect(() => {
-    if (activeView === "dashboard") {
-      loadSummaries();
-    }
-  }, [activeView]);
+    const handler = setTimeout(() => {
+      if (activeView === "dashboard") {
+        loadSummaries();
+      }
+    }, 300); // Debounce search requests
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [activeView, searchQuery]);
+
+  // Note: You will also need to update the `getCombinedSummaries` function
+  // in `frontend/lib/api.ts` to accept and pass the `search` parameter.
 
   const loadSummaries = async () => {
     try {
@@ -304,6 +315,16 @@ export default function Dashboard() {
 
       return (
         <div className="flex items-center gap-2">
+          {/* <div className="relative">
+            <Input
+              type="search"
+              placeholder="Search summaries..."
+              className="h-9 w-full rounded-md bg-white pl-8 md:w-[200px] lg:w-[300px]"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div> */}
+
           {totalTasks > 0 && (
             <Button
               variant="outline"
@@ -403,7 +424,7 @@ export default function Dashboard() {
     }
 
     return (
-      <div className="h-full p-6">
+      <div className="p-6">
         {showReconnectBanner && (
           <ReconnectBanner
             onReconnect={handleReconnect}
@@ -469,7 +490,7 @@ export default function Dashboard() {
 
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar pageTitle={getPageTitle()} actions={getTopBarActions()} />
-        <main className="flex-1 overflow-hidden">{renderMainContent()}</main>
+        <main className="flex-1 overflow-y-auto">{renderMainContent()}</main>
       </div>
 
       <DetailsDrawer
