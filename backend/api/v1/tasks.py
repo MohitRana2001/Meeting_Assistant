@@ -16,8 +16,8 @@ from core.database import get_session
 from core.security import get_current_user
 from models.user import User
 from models.summary import MeetingSummary
-from services import drive_client
-from services.task_extractor import create_google_task, create_calendar_event
+from services import google_helper
+from services import task_extractor
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -85,7 +85,7 @@ async def sync_tasks_to_google(
             }
         
         # Get Google credentials
-        creds = drive_client._credentials_from_user(current_user)
+        creds = google_helper.credentials_from_user(current_user)
         
         # Get the default task list ID
         tasks_service = build('tasks', 'v1', credentials=creds, cache_discovery=False)
@@ -141,22 +141,14 @@ async def sync_tasks_to_google(
                     continue
                 
                 # Create Google Task
-                task_body = {
-                    'title': task['text'],
-                    'notes': f"From meeting: {summary.title}\nMeeting Date: {summary.created_at.strftime('%Y-%m-%d %H:%M')}\nSync ID: meeting_{summary.id}_task_{task['id']}"
-                }
+                task_data = {'description': task['text'], 'context': f"From meeting: {summary.title}"}
+                task_result = task_extractor.create_google_task(creds, task_data, current_user.email)
                 
-                # Set task status based on completion
-                if task.get('completed', False):
-                    task_body['status'] = 'completed'
-                
-                google_task = tasks_service.tasks().insert(
-                    tasklist=task_list_id,
-                    body=task_body
-                ).execute()
-                
-                tasks_synced += 1
-                logger.info(f"Synced task to Google Tasks: {task['text']}")
+                if task_result:
+                    tasks_synced += 1
+                    logger.info(f"Synced task to Google Tasks: {task['text']}")
+                else:
+                    sync_errors.append(f"Failed to sync task '{task['text']}'")
                 
             except Exception as e:
                 error_msg = f"Failed to sync task '{task['text']}': {str(e)}"
@@ -326,7 +318,7 @@ async def get_google_tasks(
     Get tasks directly from Google Tasks API.
     """
     try:
-        creds = drive_client._credentials_from_user(current_user)
+        creds = google_helper.credentials_from_user(current_user)
         service = build('tasks', 'v1', credentials=creds, cache_discovery=False)
         
         # Get all task lists
@@ -366,55 +358,6 @@ async def get_google_tasks(
         raise HTTPException(status_code=500, detail="Failed to fetch Google Tasks")
 
 
-def find_google_task_by_sync_id(tasks_service, sync_id: str) -> Optional[Dict[str, Any]]:
-    """Find a Google Task by its sync ID in the notes."""
-    try:
-        # Get all task lists
-        tasklists = tasks_service.tasklists().list().execute()
-        
-        for tasklist in tasklists.get('items', []):
-            # Get tasks from this list
-            tasks_result = tasks_service.tasks().list(tasklist=tasklist['id']).execute()
-            
-            for task in tasks_result.get('items', []):
-                notes = task.get('notes', '')
-                if sync_id in notes:
-                    return {
-                        'task': task,
-                        'tasklist_id': tasklist['id']
-                    }
-        
-        return None
-        
-    except Exception as e:
-        logger.error(f"Failed to find Google Task by sync ID {sync_id}: {e}")
-        return None
-
-
-def update_google_task_status(tasks_service, task_id: str, tasklist_id: str, completed: bool) -> bool:
-    """Update the completion status of a Google Task."""
-    try:
-        # Get the current task
-        task = tasks_service.tasks().get(tasklist=tasklist_id, task=task_id).execute()
-        
-        # Update the status
-        task['status'] = 'completed' if completed else 'needsAction'
-        
-        # Update the task
-        tasks_service.tasks().update(
-            tasklist=tasklist_id,
-            task=task_id,
-            body=task
-        ).execute()
-        
-        logger.info(f"Updated Google Task {task_id} status to {'completed' if completed else 'active'}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Failed to update Google Task {task_id} status: {e}")
-        return False
-
-
 @router.patch("/update-google-task-status/{summary_id}/{task_id}")
 async def update_google_task_completion(
     summary_id: str,
@@ -426,6 +369,7 @@ async def update_google_task_completion(
     """
     Update task completion status in both local database and Google Tasks.
     """
+    # This endpoint is now a wrapper around the logic in meetings.py/update_task_status
     try:
         # Get the meeting summary
         stmt = (
@@ -438,67 +382,19 @@ async def update_google_task_completion(
         
         if not summary:
             raise HTTPException(status_code=404, detail="Meeting summary not found")
+
+        from api.v1.meetings import update_task_status, TaskUpdateRequest
+
+        # Re-use the primary logic from the meetings endpoint
+        task_update_request = TaskUpdateRequest(task_id=task_id, completed=completed)
         
-        # Find the task in the summary
-        task_found = False
-        for task in summary.tasks or []:
-            if task.get('id') == task_id:
-                task['completed'] = completed
-                task_found = True
-                break
-        
-        if not task_found:
-            raise HTTPException(status_code=404, detail="Task not found")
-        
-        # Update local database
-        await session.commit()
-        
-        # Update Google Tasks
-        try:
-            creds = drive_client._credentials_from_user(current_user)
-            tasks_service = build('tasks', 'v1', credentials=creds, cache_discovery=False)
-            
-            # Look for the corresponding Google Task using sync ID
-            sync_id = f"meeting_{summary.id}_task_{task_id}"
-            google_task_info = find_google_task_by_sync_id(tasks_service, sync_id)
-            
-            if google_task_info:
-                google_task = google_task_info['task']
-                tasklist_id = google_task_info['tasklist_id']
-                
-                success = update_google_task_status(
-                    tasks_service, 
-                    google_task['id'], 
-                    tasklist_id, 
-                    completed
-                )
-                
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"Task {'completed' if completed else 'reopened'} in both local and Google Tasks",
-                        "google_task_updated": True
-                    }
-                else:
-                    return {
-                        "success": True,
-                        "message": f"Task {'completed' if completed else 'reopened'} locally, but failed to update Google Tasks",
-                        "google_task_updated": False
-                    }
-            else:
-                return {
-                    "success": True,
-                    "message": f"Task {'completed' if completed else 'reopened'} locally. No corresponding Google Task found.",
-                    "google_task_updated": False
-                }
-                
-        except Exception as e:
-            logger.warning(f"Failed to update Google Tasks for user {current_user.email}: {e}")
-            return {
-                "success": True,
-                "message": f"Task {'completed' if completed else 'reopened'} locally, but Google Tasks update failed",
-                "google_task_updated": False
-            }
+        return await update_task_status(
+            summary_id=int(summary_id),
+            task_id=task_id,
+            task_update=task_update_request,
+            current_user=current_user,
+            session=session
+        )
         
     except Exception as e:
         logger.exception(f"Unexpected error updating task status for user {current_user.email}: {e}")

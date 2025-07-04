@@ -14,7 +14,7 @@ from loguru import logger
 from core.database import get_session
 from core.security import get_current_user
 from models.user import User
-from services import drive_client
+from services import google_helper
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
@@ -28,7 +28,7 @@ async def get_calendar_events(
     Get upcoming calendar events from user's Google Calendar.
     """
     try:
-        creds = drive_client._credentials_from_user(current_user)
+        creds = google_helper.credentials_from_user(current_user)
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
         # Get events from primary calendar for the next 30 days
@@ -126,7 +126,7 @@ async def create_calendar_event(
     Create a new calendar event.
     """
     try:
-        creds = drive_client._credentials_from_user(current_user)
+        creds = google_helper.credentials_from_user(current_user)
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
         # Validate required fields
@@ -189,7 +189,7 @@ async def get_calendar_event(
     Get a specific calendar event by ID.
     """
     try:
-        creds = drive_client._credentials_from_user(current_user)
+        creds = google_helper.credentials_from_user(current_user)
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
         event = (

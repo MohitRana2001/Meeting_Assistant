@@ -5,7 +5,7 @@ Task extraction and Google Tasks/Calendar integration service.
 import json
 import re
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from loguru import logger
@@ -76,7 +76,7 @@ def extract_tasks_from_transcript(transcript: str) -> List[Dict[str, Any]]:
         logger.exception(f"Failed to extract tasks: {e}")
         return []
 
-def create_google_task(creds: Credentials, task_data: Dict[str, Any], user_email: str) -> Optional[str]:
+def create_google_task(creds: Credentials, task_data: Dict[str, Any], user_email: str) -> Optional[Tuple[Dict[str, Any], str]]:
     """
     Create a Google Task from extracted task data.
     Returns the task ID if successful, None otherwise.
@@ -109,7 +109,7 @@ def create_google_task(creds: Credentials, task_data: Dict[str, Any], user_email
         ).execute()
         
         logger.info(f"Created Google Task: {task['id']} - {task_data['description']}")
-        return task['id']
+        return task, task_list_id
         
     except Exception as e:
         logger.exception(f"Failed to create Google Task: {e}")
@@ -187,13 +187,17 @@ def process_meeting_for_tasks(transcript: str, creds: Credentials, user_email: s
     tasks_created = 0
     events_created = 0
     errors = []
+    processed_tasks = []
     
     for task_data in extracted_tasks:
         try:
             # Create Google Task
-            task_id = create_google_task(creds, task_data, user_email)
-            if task_id:
+            task_result = create_google_task(creds, task_data, user_email)
+            if task_result:
+                task, task_list_id = task_result
                 tasks_created += 1
+                task_data['google_task_id'] = task['id']
+                task_data['google_tasklist_id'] = task_list_id
             
             # Create Calendar Event (if due date exists)
             event_id = create_calendar_event(creds, task_data, user_email)
@@ -204,14 +208,65 @@ def process_meeting_for_tasks(transcript: str, creds: Credentials, user_email: s
             error_msg = f"Failed to process task '{task_data.get('description', 'Unknown')}': {e}"
             logger.error(error_msg)
             errors.append(error_msg)
+        
+        processed_tasks.append(task_data)
     
     result = {
         "tasks_extracted": len(extracted_tasks),
         "tasks_created": tasks_created,
         "events_created": events_created,
         "errors": errors,
-        "extracted_tasks": extracted_tasks
+        "processed_tasks": processed_tasks
     }
     
     logger.info(f"Task processing complete: {tasks_created} tasks created, {events_created} events created")
     return result 
+
+
+def update_google_task_status(creds: Credentials, task_id: str, tasklist_id: str, completed: bool) -> bool:
+    """Update the completion status of a Google Task."""
+    try:
+        service = build('tasks', 'v1', credentials=creds, cache_discovery=False)
+        
+        # Get the current task
+        task = service.tasks().get(tasklist=tasklist_id, task=task_id).execute()
+        
+        # Update the status
+        task['status'] = 'completed' if completed else 'needsAction'
+        
+        # Update the task
+        service.tasks().update(
+            tasklist=tasklist_id,
+            task=task_id,
+            body=task
+        ).execute()
+        
+        logger.info(f"Updated Google Task {task_id} status to {'completed' if completed else 'active'}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to update Google Task {task_id} status: {e}")
+        return False
+
+
+def get_all_google_tasks_status(creds: Credentials) -> Dict[str, bool]:
+    """
+    Fetches all tasks from all task lists and returns their completion status.
+    Returns a dictionary mapping task_id to a boolean (True if completed).
+    """
+    all_tasks_status = {}
+    try:
+        service = build('tasks', 'v1', credentials=creds, cache_discovery=False)
+        tasklists = service.tasklists().list().execute().get('items', [])
+        
+        for tasklist in tasklists:
+            tasks_result = service.tasks().list(tasklist=tasklist['id'], showCompleted=True, showHidden=True).execute()
+            for task in tasks_result.get('items', []):
+                all_tasks_status[task['id']] = task.get('status') == 'completed'
+
+    except HttpError as e:
+        logger.error(f"Google Tasks API error while fetching all tasks: {e}")
+    except Exception as e:
+        logger.exception(f"Unexpected error fetching all Google Tasks status: {e}")
+        
+    return all_tasks_status

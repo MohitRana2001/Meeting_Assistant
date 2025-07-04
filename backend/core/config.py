@@ -40,6 +40,9 @@ class _Settings(BaseSettings):
     # Log level (DEBUG/INFO/WARNING/ERROR)
     LOG_LEVEL: str = "INFO"
 
+    # Feature flags
+    ENABLE_GMAIL: bool = True
+
     # --- internal ---
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent / ".env",

@@ -7,7 +7,8 @@ from sqlalchemy import pool
 
 from alembic import context
 from sqlmodel import SQLModel
-from models import user  # noqa: F401  (import all models)
+from models.user import User  # noqa: F401
+from models.summary import MeetingSummary # noqa: F401
 
 # Load environment variables
 load_dotenv()
@@ -46,9 +47,10 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./app.db")
+    database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./app.db")
+    sync_database_url = database_url.replace("+aiosqlite", "")
     context.configure(
-        url=url,
+        url=sync_database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -67,9 +69,10 @@ def run_migrations_online() -> None:
     """
     # Get the database URL from environment or use default
     database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./app.db")
+    sync_database_url = database_url.replace("+aiosqlite", "")
     
     # Update the config with the actual database URL
-    config.set_main_option("sqlalchemy.url", database_url)
+    config.set_main_option("sqlalchemy.url", sync_database_url)
     
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),

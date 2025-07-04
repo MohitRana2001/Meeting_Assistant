@@ -11,8 +11,8 @@ from core.security import create_access_token
 from core.database import get_session
 from models.user import User
 from services.google_oauth import build_flow, get_user_info
-from services.drive_client import ensure_drive_watch
-from services import drive_client
+from services.drive_client import ensure_drive_watch, find_meet_folder_id
+from services import google_helper
 from core.logging import logger
 from core.security import get_current_user
 from googleapiclient.discovery import build
@@ -80,7 +80,7 @@ async def auth_google_callback(
 
         jwt_token = create_access_token({"sub": str(user.id), "email": email})
 
-        folder_id = drive_client.find_meet_folder_id(credentials)
+        folder_id = find_meet_folder_id(credentials)
         if folder_id:
             user.meet_folder_id = folder_id
         else:
@@ -113,7 +113,7 @@ async def check_user_permissions(
     If not, return reauthentication URL.
     """
     try:
-        creds = drive_client._credentials_from_user(current_user)
+        creds = google_helper.credentials_from_user(current_user)
         # Test the credentials by making a simple API call
         service = build("drive", "v3", credentials=creds, cache_discovery=False)
         service.about().get(fields="user").execute()

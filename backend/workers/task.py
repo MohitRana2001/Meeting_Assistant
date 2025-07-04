@@ -19,7 +19,7 @@ from core.config import settings
 from core.database import async_session_factory, sync_engine
 from models.user import User
 from models.summary import MeetingSummary
-from services import drive_client
+from services import drive_client, google_helper
 from services.summarizer import summarise_transcript
 from services.task_extractor import process_meeting_for_tasks
 
@@ -96,7 +96,7 @@ def process_drive_notification(header_map: dict[str, str]) -> str:
 
             try:
                 title, content = drive_client.download_plain_text(
-                    file["id"], drive_client._credentials_from_user(user)  # noqa: SLF001
+                    file["id"], google_helper.credentials_from_user(user)
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Failed download {}", file["id"])
@@ -110,7 +110,7 @@ def process_drive_notification(header_map: dict[str, str]) -> str:
             
             # Then, process for Google Tasks and Calendar integration
             try:
-                creds = drive_client._credentials_from_user(user)
+                creds = google_helper.credentials_from_user(user)
                 google_result = process_meeting_for_tasks(content, creds, user.email)
                 
                 logger.info(
@@ -181,4 +181,3 @@ def process_drive_notification(header_map: dict[str, str]) -> str:
         logger.debug("[Celery] Finished channel={} newToken={}", channel_id, new_token)
 
     return f"created {len(summaries_created)} summaries"
-

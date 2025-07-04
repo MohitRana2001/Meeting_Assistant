@@ -25,12 +25,8 @@ def summarise_transcript(transcript: str) -> dict:
     Summarize a meeting transcript and extract action items using Gemini.
     """
     try:
-        result = model.generate_content(
-            [
-                {"role": "system", "parts": [SYSTEM_PROMPT]},
-                {"role": "user", "parts": [transcript]},
-            ],
-            generation_config={
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{transcript}"
+        result = model.generate_content(full_prompt, generation_config={
                 "temperature": 0.2,
                 "max_output_tokens": 512,
             },

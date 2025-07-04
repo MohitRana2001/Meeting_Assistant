@@ -1,9 +1,8 @@
 """
 Notifications API endpoints.
 """
-
 from typing import List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,11 +43,10 @@ async def get_notifications(
         
         for summary in recent_summaries:
             # Check if it's recent (within last 7 days)
-            created_time = summary.created_at
-            if isinstance(created_time, str):
-                created_time = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
-            
-            time_diff = datetime.now() - created_time.replace(tzinfo=None)
+            created_time = summary.created_at.replace(tzinfo=timezone.utc) if summary.created_at.tzinfo is None else summary.created_at
+
+            # Compare aware datetimes
+            time_diff = datetime.now(timezone.utc) - created_time
             is_recent = time_diff <= timedelta(days=7)
             
             # Count tasks for this summary
@@ -72,11 +70,8 @@ async def get_notifications(
         # Add system notifications for successful integrations
         if len(recent_summaries) > 0:
             latest_summary = recent_summaries[0]
-            latest_created = latest_summary.created_at
-            if isinstance(latest_created, str):
-                latest_created = datetime.fromisoformat(latest_created.replace('Z', '+00:00'))
-            
-            time_diff = datetime.now() - latest_created.replace(tzinfo=None)
+            latest_created = latest_summary.created_at.replace(tzinfo=timezone.utc) if latest_summary.created_at.tzinfo is None else latest_summary.created_at
+            time_diff = datetime.now(timezone.utc) - latest_created
             
             # Add Google Tasks sync notification if recent
             if time_diff <= timedelta(hours=1):
@@ -160,21 +155,16 @@ async def get_unread_count(
         recent_summaries = result.scalars().all()
         
         unread_count = 0
-        cutoff_time = datetime.now() - timedelta(hours=24)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
         
         for summary in recent_summaries:
-            created_time = summary.created_at
-            if isinstance(created_time, str):
-                created_time = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
-            
-            if created_time.replace(tzinfo=None) > cutoff_time:
-                unread_count += 1  # Each recent summary creates 3 notifications (summary + tasks + calendar)
-                if unread_count == 1:  # First recent summary gets 3 notifications
-                    unread_count = 3
-                else:
-                    unread_count += 2  # Subsequent summaries add 2 more each
+            created_time = summary.created_at.replace(tzinfo=timezone.utc) if summary.created_at.tzinfo is None else summary.created_at
+
+            if created_time > cutoff_time:
+                # Each recent summary is considered to generate 3 unread notifications
+                unread_count += 2
         
-        return {"unreadCount": min(unread_count, 10)}  # Cap at 10 for UI purposes
+        return {"unreadCount": min(unread_count, 99)}  # Cap at 99 for UI purposes
     
     except Exception as e:
         logger.exception("Error getting unread count for user {}: {}", current_user.email, e)

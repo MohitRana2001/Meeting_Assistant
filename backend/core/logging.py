@@ -14,7 +14,7 @@ def configure_logging() -> None:
     logger.remove()
 
     logger.add(
-        sys.stdout,
+        sys.stderr,
         level=settings.LOG_LEVEL,
         diagnose=False,  # pretty tracebacks off in prod
         backtrace=settings.ENV == "development",
@@ -34,4 +34,3 @@ def configure_logging() -> None:
         enqueue=True,
         backtrace=False,
     )
-

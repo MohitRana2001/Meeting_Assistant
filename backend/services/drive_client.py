@@ -14,20 +14,14 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from dateutil import parser as dateparse
 from loguru import logger
 
 from core.config import settings
-from core.crypto import decrypt
 from models.user import User
+from services.google_helper import credentials_from_user
 
 MIME_TEXT = "text/plain"
-SCOPES = [
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/tasks",
-    "https://www.googleapis.com/auth/calendar"
-]
 
 
 async def ensure_drive_watch(user: User) -> None:
@@ -41,42 +35,6 @@ async def ensure_drive_watch(user: User) -> None:
     # No ngrok or public URL required
     logger.info("Drive watch disabled for local development (user: {})", user.email)
     return
-    
-    # ORIGINAL WEBHOOK CODE (commented out for local development):
-    # if (
-    #     user.drive_channel_id
-    #     and user.drive_channel_expire_at
-    #     and user.drive_channel_expire_at > datetime.utcnow() + timedelta(hours=24)
-    # ):
-    #     return # still valid for >24 h
-
-    # creds = _credentials_from_user(user)
-    # service = build("drive", "v3", credentials=creds, cache_discovery=False)
-
-    # # 1. get latest page token
-    # start_page_token = (
-    #     service.changes().getStartPageToken().execute().get("startPageToken")
-    # )
-
-    # # 2. create channel
-    # channel_id = str(uuid.uuid4())
-    # body = {
-    #     "id": channel_id,
-    #     "type": "web_hook",
-    #     "address": settings.drive_webhook_address,
-    #     "token": str(user.id), # echoed in notifications for easy lookup
-    #     "payload": False,
-    # }
-    # resp = service.changes().watch(body=body, pageToken=start_page_token).execute()
-    # logger.info("Registered Drive watch for user {} (channel {})", user.email, channel_id)
-
-    # # 3. update user
-    # user.drive_channel_id = resp["id"]
-    # user.drive_page_token = start_page_token
-    # # `expiration` is ms‑since‑epoch string
-    # user.drive_channel_expire_at = datetime.fromtimestamp(
-    #     int(resp["expiration"]) / 1000, tz=timezone.utc
-    # )
 
 
 def parse_drive_headers(headers: dict[str, str]) -> dict[str, str]:
@@ -100,7 +58,7 @@ def list_changes(user: User) -> Tuple[List[dict[str, Any]], str]:
 
     This function correctly handles initial sync and pagination.
     """
-    creds = _credentials_from_user(user)
+    creds = credentials_from_user(user)
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
 
     page_token = user.drive_page_token
@@ -109,11 +67,44 @@ def list_changes(user: User) -> Tuple[List[dict[str, Any]], str]:
     # If the user has no token, we must get a starting point.
     if not page_token:
         logger.info("No page token for user {}, performing first-time sync setup.", user.email)
+        
+        initial_changes: List[dict[str, Any]] = []
+        
+        if user.meet_folder_id:
+            query = f"'{user.meet_folder_id}' in parents and trashed = false"
+            next_page_token: str | None = None
+            
+            while True:
+                file_resp = (
+                    service.files()
+                    .list(
+                        q=query,
+                        spaces="drive",
+                        fields="nextPageToken, files(id, name, mimeType, trashed, modifiedTime, parents)",
+                        pageToken=next_page_token,
+                    )
+                    .execute()
+                )
+                
+                for f in file_resp.get("files", []):
+                    initial_changes.append({"file": f})
+                    
+                next_page_token = file_resp.get("nextPageToken")
+                if not next_page_token:
+                    break
+        else:
+            # If no meet_folder_id, we can't list files, so we just return empty.
+            logger.warning(
+                "User {} does not have a meet_folder_id set. Initial sync will skip existing files.",
+                user.email,
+            )
+        
         response = service.changes().getStartPageToken().execute()
+        
         start_token = response.get('startPageToken')
-        # On the first run, there are no "changes" to return.
-        # We return the new token so it can be saved for the next sync.
-        return [], start_token
+
+        logger.info("Initial sync for user {} found {} existing files in 'Meet Recordings' folder.", user.email, len(initial_changes))
+        return initial_changes, start_token
 
     # --- 2. Fetch Changes with Pagination ---
     all_changes = []
@@ -210,20 +201,6 @@ def download_plain_text(file_id: str, creds: Credentials) -> Tuple[str, str]:
 # ─── internal helpers ─────────────────────────────────────────────────────────
 
 
-def _credentials_from_user(user: User) -> Credentials:
-    refresh_token = decrypt(user.refresh_token_enc)
-    creds = Credentials(
-        token=None,
-        refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=settings.GOOGLE_CLIENT_ID,
-        client_secret=settings.GOOGLE_CLIENT_SECRET,
-        scopes=SCOPES,
-    )
-    # force refresh so we have an access token
-    creds.refresh(Request())
-    return creds
-
 def find_meet_folder_id(creds) -> str | None:
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
     resp = (
@@ -240,4 +217,3 @@ def find_meet_folder_id(creds) -> str | None:
     )
     files = resp.get("files", [])
     return files[0]["id"] if files else None
-
