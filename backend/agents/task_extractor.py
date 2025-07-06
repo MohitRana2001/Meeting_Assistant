@@ -54,14 +54,3 @@ def summarize_meeting(transcript: str) -> Dict[str, Any]:
             "summary": transcript[:140] + "...",
             "tasks": [],
         }
-
-# --------------------------------------------------------------------------- #
-# Single-tool Agent instance
-# --------------------------------------------------------------------------- #
-agent = Agent(
-    name="MeetingSummarizer",
-    model=settings.GEMINI_MODEL,
-    description="Summarize a meeting transcript and extract action items.",
-    instruction=SYSTEM_PROMPT,
-    tools=[summarize_meeting],
-)

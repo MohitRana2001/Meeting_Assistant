@@ -162,7 +162,7 @@ async def get_unread_count(
 
             if created_time > cutoff_time:
                 # Each recent summary is considered to generate 3 unread notifications
-                unread_count += 2
+                unread_count += 3
         
         return {"unreadCount": min(unread_count, 99)}  # Cap at 99 for UI purposes
     

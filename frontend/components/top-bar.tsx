@@ -163,7 +163,7 @@ export function TopBar({ pageTitle, actions }: TopBarProps) {
               </div>
             </SheetHeader>
 
-            <div className="mt-6 space-y-3">
+            <div className="mt-6 space-y-3 max-h-[80vh] overflow-y-auto pr-2">
               {loading && notifications.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-2" />
