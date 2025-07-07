@@ -37,6 +37,8 @@ class _Settings(BaseSettings):
     # Database (Phase 2)
     DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
     
+    DB_PASSWORD: str | None = None # Injected from Secret Manager in prod
+
     # Redis for Celery (Cloud Memorystore in production)
     REDIS_URL: str = "redis://localhost:6379/0"
     
@@ -49,7 +51,9 @@ class _Settings(BaseSettings):
         if self.ENV == "production" and self.CLOUD_SQL_CONNECTION_NAME:
             # Extract database name from current DATABASE_URL
             db_name = "meeting_assistant"  # or parse from DATABASE_URL
-            return f"postgresql+asyncpg://app_user:PASSWORD@/{db_name}?host=/cloudsql/{self.CLOUD_SQL_CONNECTION_NAME}"
+            if not self.DB_PASSWORD:
+                raise ValueError("DB_PASSWORD must be set in production environment")
+            return f"postgresql+asyncpg://app_user:{self.DB_PASSWORD}@/{db_name}?host=/cloudsql/{self.CLOUD_SQL_CONNECTION_NAME}"
         return self.DATABASE_URL
 
     # Log level (DEBUG/INFO/WARNING/ERROR)

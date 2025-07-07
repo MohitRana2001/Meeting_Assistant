@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_ID="${PROJECT_ID:-your-project-id}"
+PROJECT_ID="${PROJECT_ID:-ps-apprentice}"
 REGION="${REGION:-us-central1}"
 BUCKET="${PROJECT_ID}-meeting-assistant-frontend"
 BACKEND_SERVICE_NAME="meeting-assistant-backend"
@@ -67,7 +67,8 @@ enable_apis() {
         sqladmin.googleapis.com \
         redis.googleapis.com \
         secretmanager.googleapis.com \
-        storage.googleapis.com
+        storage.googleapis.com \
+        servicenetworking.googleapis.com
     
     log "APIs enabled ✓"
 }
@@ -88,6 +89,26 @@ setup_secrets() {
     done
 }
 
+grant_permissions() {
+    log "Granting required IAM permissions..."
+    
+    PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
+    SERVICE_ACCOUNT_EMAIL="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+    
+    # Grant Secret Manager access to the default Compute service account (used by Cloud Run)
+    if ! gcloud projects get-iam-policy $PROJECT_ID --flatten="bindings[].members" --format="table(bindings.role)" --filter="bindings.members:$SERVICE_ACCOUNT_EMAIL" | grep -q "roles/secretmanager.secretAccessor"; then
+        log "Granting Secret Manager access to Cloud Run service account..."
+        gcloud projects add-iam-policy-binding $PROJECT_ID \
+            --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
+            --role="roles/secretmanager.secretAccessor" \
+            --condition=None # Explicitly set no condition
+    else
+        log "Secret Manager access already granted to Cloud Run service account ✓"
+    fi
+    
+    log "IAM permissions setup complete ✓"
+}
+
 setup_infrastructure() {
     log "Setting up infrastructure..."
     
@@ -101,28 +122,72 @@ setup_infrastructure() {
             --storage-type=SSD \
             --storage-size=10GB \
             --backup-start-time=03:00 \
-            --enable-bin-log \
             --maintenance-window-day=SUN \
             --maintenance-window-hour=04 \
             --deletion-protection
-        
-        # Create database
-        gcloud sql databases create meeting_assistant --instance=$DB_INSTANCE_NAME
-        
-        # Create user (you'll need to set the password)
-        warn "Please set a secure password for the database user:"
-        gcloud sql users create app_user --instance=$DB_INSTANCE_NAME --password
     else
         log "Cloud SQL instance already exists ✓"
     fi
+
+    # Create database if it doesn't exist
+    if ! gcloud sql databases describe meeting_assistant --instance=$DB_INSTANCE_NAME &> /dev/null; then
+        log "Creating 'meeting_assistant' database..."
+        gcloud sql databases create meeting_assistant --instance=$DB_INSTANCE_NAME
+    else
+        log "Database 'meeting_assistant' already exists ✓"
+    fi
+
+    # Create database user and password secret if the user doesn't exist
+    if ! gcloud sql users list --instance=$DB_INSTANCE_NAME | grep -q "app_user"; then
+        log "Creating database user 'app_user' and password secret..."
+        DB_PASSWORD=$(openssl rand -base64 32)
+        echo -n "$DB_PASSWORD" | gcloud secrets create db-password --data-file=- --quiet || \
+        echo -n "$DB_PASSWORD" | gcloud secrets versions add db-password --data-file=- --quiet
+        
+        gcloud sql users create app_user --instance=$DB_INSTANCE_NAME --password="$DB_PASSWORD"
+        log "Database user 'app_user' created and password stored in Secret Manager."
+    else
+        log "Database user 'app_user' already exists ✓"
+    fi
     
+    # Check for default network and create if it doesn't exist
+    log "Checking for default VPC network..."
+    if ! gcloud compute networks describe default &> /dev/null; then
+        log "Default network not found. Creating it now with auto-subnets..."
+        gcloud compute networks create default --subnet-mode=auto
+        log "Default network created ✓"
+    else
+        log "Default network already exists ✓"
+    fi
+    
+    # Set up VPC Peering for Redis, which is required for PRIVATE_SERVICE_ACCESS
+    log "Setting up VPC Peering for Redis..."
+    if ! gcloud compute addresses describe google-managed-services-default --global &> /dev/null; then
+        log "Allocating IP range for service networking..."
+        gcloud compute addresses create google-managed-services-default \
+            --global \
+            --purpose=VPC_PEERING \
+            --prefix-length=16 \
+            --network=default
+    else
+        log "IP range 'google-managed-services-default' already allocated ✓"
+    fi
+
+    if ! gcloud services vpc-peerings list --network=default | grep -q "servicenetworking-googleapis-com"; then
+        log "Creating VPC peering connection..."
+        gcloud services vpc-peerings connect --service=servicenetworking.googleapis.com --ranges=google-managed-services-default --network=default
+    else
+        log "VPC peering connection already exists ✓"
+    fi
+
     # Create Redis instance
     if ! gcloud redis instances describe $REDIS_INSTANCE_NAME --region=$REGION &> /dev/null; then
         log "Creating Redis instance..."
         gcloud redis instances create $REDIS_INSTANCE_NAME \
             --size=1 \
             --region=$REGION \
-            --redis-version=redis_6_x
+            --redis-version=redis_6_x \
+            --connect-mode=PRIVATE_SERVICE_ACCESS
     else
         log "Redis instance already exists ✓"
     fi
@@ -145,14 +210,14 @@ deploy_backend() {
     # Get Redis IP
     REDIS_IP=$(gcloud redis instances describe $REDIS_INSTANCE_NAME --region=$REGION --format="value(host)")
     
-    # Deploy to Cloud Run
-    log "Deploying to Cloud Run..."
+    # Deploy to Cloud Run (pass 1/2, without API_BASE_URL)
+    log "Deploying to Cloud Run (pass 1/2)..."
     gcloud run deploy $BACKEND_SERVICE_NAME \
         --image gcr.io/$PROJECT_ID/$BACKEND_SERVICE_NAME \
         --platform=managed \
         --region=$REGION \
         --allow-unauthenticated \
-        --port=8080 \
+        --port=8000 \
         --memory=1Gi \
         --cpu=1 \
         --min-instances=0 \
@@ -161,17 +226,23 @@ deploy_backend() {
         --set-env-vars="ENV=production" \
         --set-env-vars="CLOUD_SQL_CONNECTION_NAME=$SQL_CONNECTION" \
         --set-env-vars="REDIS_URL=redis://$REDIS_IP:6379/0" \
-        --set-env-vars="API_BASE_URL=https://$BACKEND_SERVICE_NAME-$(gcloud run services describe $BACKEND_SERVICE_NAME --region=$REGION --format='value(status.url)' | cut -d'/' -f3)" \
         --set-env-vars="FRONTEND_URL=https://storage.googleapis.com/$BUCKET" \
         --set-secrets="GOOGLE_CLIENT_ID=google-client-id:latest" \
         --set-secrets="GOOGLE_CLIENT_SECRET=google-client-secret:latest" \
         --set-secrets="SECRET_KEY=app-secret-key:latest" \
         --set-secrets="GEMINI_API_KEY=gemini-api-key:latest" \
+        --set-secrets="DB_PASSWORD=db-password:latest" \
         --timeout=300
     
     # Get the service URL
     BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --region=$REGION --format='value(status.url)')
     
+    # Update service with its own URL (pass 2/2)
+    log "Updating Cloud Run service with API_BASE_URL (pass 2/2)..."
+    gcloud run services update $BACKEND_SERVICE_NAME \
+        --region=$REGION \
+        --update-env-vars="API_BASE_URL=$BACKEND_URL"
+
     cd ..
     
     log "Backend deployed ✓"
@@ -191,7 +262,7 @@ deploy_frontend() {
     # Build with production API URL
     if [ -n "$BACKEND_URL" ]; then
         log "Building frontend with API URL: $BACKEND_URL"
-        REACT_APP_API_URL="$BACKEND_URL" npm run build
+        NEXT_PUBLIC_API_URL="$BACKEND_URL" npm run build
     else
         warn "Backend URL not found. Building with default configuration."
         npm run build
@@ -231,6 +302,7 @@ main() {
     check_prerequisites
     enable_apis
     setup_secrets
+    grant_permissions
     setup_infrastructure
     deploy_backend
     deploy_frontend
