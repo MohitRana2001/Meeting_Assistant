@@ -25,7 +25,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 async def auth_google() -> RedirectResponse:
     """
     Start the OAuth consent screen.  The generated `state` param protects
-    against CSRF – Google stores it and echoes it back.
+    against CSRF - Google stores it and echoes it back.
     """
     flow = build_flow()
     auth_url, state = flow.authorization_url(

@@ -36,6 +36,21 @@ class _Settings(BaseSettings):
 
     # Database (Phase 2)
     DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
+    
+    # Redis for Celery (Cloud Memorystore in production)
+    REDIS_URL: str = "redis://localhost:6379/0"
+    
+    # Cloud SQL connection (for production)
+    CLOUD_SQL_CONNECTION_NAME: str | None = None  # format: project:region:instance
+    
+    @property
+    def database_url_for_cloud_sql(self) -> str:
+        """Generate Cloud SQL connection URL if running in GCP"""
+        if self.ENV == "production" and self.CLOUD_SQL_CONNECTION_NAME:
+            # Extract database name from current DATABASE_URL
+            db_name = "meeting_assistant"  # or parse from DATABASE_URL
+            return f"postgresql+asyncpg://app_user:PASSWORD@/{db_name}?host=/cloudsql/{self.CLOUD_SQL_CONNECTION_NAME}"
+        return self.DATABASE_URL
 
     # Log level (DEBUG/INFO/WARNING/ERROR)
     LOG_LEVEL: str = "INFO"

@@ -236,6 +236,10 @@ def get_gmail_attachment_links(user: User, email_id: str) -> List[Dict[str, Any]
     Get attachment download links from a Gmail message.
     Enhanced to handle meeting summary attachments.
     """
+    if not settings.ENABLE_GMAIL:
+        logger.info("Gmail integration disabled via config; skipping attachment retrieval.")
+        return []
+
     try:
         creds = google_helper.credentials_from_user(user)
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
@@ -296,6 +300,10 @@ def download_gmail_attachment(user: User, email_id: str, attachment_id: str) -> 
     """
     Download a specific attachment from a Gmail message.
     """
+    if not settings.ENABLE_GMAIL:
+        logger.info("Gmail integration disabled via config; skipping attachment download.")
+        return None
+
     try:
         creds = google_helper.credentials_from_user(user)
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)

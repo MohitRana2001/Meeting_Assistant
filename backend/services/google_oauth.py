@@ -1,5 +1,5 @@
 """
-Thin wrapper around google‑auth‑oauthlib flow utilities.
+Thin wrapper around google-auth-oauthlib flow utilities.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from google.auth.transport import requests
 
 from core.config import settings
 
+# --- OAuth Scopes ----------------------------------------------------------
+# Build the scope list dynamically so Gmail can be disabled via env-flag.
 SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
